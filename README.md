@@ -12,3 +12,4 @@ stays as the device-evaluation tool. Its contracts (stream protocol v1,
 format of its own.
 
 Plan and progress: `initiatives/`.
+# mocap-camera-app
