@@ -3,7 +3,7 @@
 **Goal:** A production STREAM camera app. It streams protocol v1 to the recorder, keeps streaming through screen-off, battery savers and reboots, exposes **every** Camera2 control the device offers to the recorder, applies any of them on command, and reports what it actually applied.
 
 **Scope:**
-- Java, Camera2, MediaCodec hardware H.264, `minSdk` as in the eval app (21) unless the generated Java contracts need more (`mocap-contracts` camera-protocol camera-messages/2)
+- Java, Camera2, MediaCodec hardware H.264, **`minSdk 24`**: Harpia's verified Android configuration for its Java output; the M7 tablet runs SDK 33 (`mocap-contracts` camera-messages/2, decision for Rafael's review)
 - built in Docker (JDK 17, Android SDK 34, Gradle), like `camera-stream-eval`
 - control, info and stats over Harpia ZeroMQ, using the generated Java messages from `mocap-contracts`
 
