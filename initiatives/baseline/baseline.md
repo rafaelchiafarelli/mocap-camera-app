@@ -1,6 +1,6 @@
 # baseline — mocap-camera-app
 
-**Goal:** A production STREAM camera app. It streams protocol v1 to the recorder, keeps streaming through screen-off, battery savers and reboots, locks exposure/ISO/focus/white balance on command, and reports what it actually applied.
+**Goal:** A production STREAM camera app. It streams protocol v1 to the recorder, keeps streaming through screen-off, battery savers and reboots, exposes **every** Camera2 control the device offers to the recorder, applies any of them on command, and reports what it actually applied.
 
 **Scope:**
 - Java, Camera2, MediaCodec hardware H.264, `minSdk` as in the eval app (21) unless the generated Java contracts need more (`mocap-contracts` camera-protocol camera-messages/2)

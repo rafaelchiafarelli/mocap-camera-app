@@ -6,5 +6,5 @@
   - Requires: the generated Java/JeroMQ endpoints only (Harpia USAGE §7.6: `newReceiver` binds the app's request port, `newSender` connects to the recorder's reply port, `newPublisher` for stats); `receive()` blocks, so it runs on its own thread with a receive timeout; the HTTP `/control`, `/info`, `/stats` of the eval app are removed once this works
   - Delivers: `ControlRequest` → apply → `ControlReply`; `DeviceInfo` on request; `CameraStats` every second
 - **Pre-work:** none beyond the dependency
-- **Out of scope:** manual exposure/focus (task 2); this task applies the stream settings (size, fps, bitrate, camera)
+- **Out of scope:** camera controls (tasks 2, 3); this task applies the stream settings (camera id, size, fps, bitrate)
 - **Tests:** Python ↔ Java loopback against the generated Python endpoint
