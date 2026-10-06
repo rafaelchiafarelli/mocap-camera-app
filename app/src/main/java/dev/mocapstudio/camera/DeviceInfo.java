@@ -18,7 +18,9 @@ import com.harpia.generated.CameraInfo;
 import com.harpia.generated.FpsRange;
 import com.harpia.generated.FrameSize;
 
+import java.util.Collections;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * What this device can do, from the Android APIs (no vendor-specific dumpsys parsing): json() for the log and
@@ -116,8 +118,11 @@ final class DeviceInfo {
         }
     }
 
-    /** The same, as the generated camera.harpia DeviceInfo sent in a ControlReply. Controls: control/2. */
-    static com.harpia.generated.DeviceInfo.Builder proto(Context context, String serial) {
+    /**
+     * The same, as the generated camera.harpia DeviceInfo sent in a ControlReply, with every settable control of
+     * every camera (ControlCatalog); the streaming camera's controls also carry their current and default values.
+     */
+    static com.harpia.generated.DeviceInfo.Builder proto(Context context, String serial, CameraStreamer streaming) {
         com.harpia.generated.DeviceInfo.Builder d = com.harpia.generated.DeviceInfo.newBuilder()
                 .setModel(Build.MANUFACTURER + " " + Build.MODEL)
                 .setSerial(serial)
@@ -131,14 +136,20 @@ final class DeviceInfo {
         }
         try {
             CameraManager m = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
-            for (String id : m.getCameraIdList()) d.addCameras(cameraInfo(m.getCameraCharacteristics(id), id));
+            for (String id : m.getCameraIdList()) {
+                boolean open = streaming != null && id.equals(streaming.cameraId());
+                d.addCameras(cameraInfo(m.getCameraCharacteristics(id), id,
+                        open ? streaming.currentValues() : Collections.<String, Object>emptyMap(),
+                        open ? streaming.defaultValues() : Collections.<String, Object>emptyMap()));
+            }
         } catch (Exception e) {
             android.util.Log.w("MocapCamera", "camera list failed", e);
         }
         return d;
     }
 
-    private static CameraInfo cameraInfo(CameraCharacteristics c, String id) {
+    private static CameraInfo cameraInfo(CameraCharacteristics c, String id, Map<String, Object> current,
+                                         Map<String, Object> defaults) {
         CameraInfo.Builder b = CameraInfo.newBuilder().setCameraId(id);
         Integer facing = c.get(CameraCharacteristics.LENS_FACING);
         b.setFacing(facing == null ? CameraFacing.CAMERA_FACING_UNSET
@@ -161,6 +172,8 @@ final class DeviceInfo {
                 b.addFpsRanges(FpsRange.newBuilder().setMinFps(r.getLower()).setMaxFps(r.getUpper()));
             }
         }
+        b.addAllControls(ControlCatalog.capabilities(Camera2Values.requestKeys(c), Camera2Values.characteristics(c),
+                current, defaults));
         return b.build();
     }
 
