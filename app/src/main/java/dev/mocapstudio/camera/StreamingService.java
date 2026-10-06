@@ -8,6 +8,7 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
+import android.hardware.camera2.CameraCharacteristics;
 import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Handler;
@@ -16,16 +17,23 @@ import android.os.Looper;
 import android.os.PowerManager;
 import android.util.Log;
 
+import com.harpia.generated.ControlCapability;
 import com.harpia.generated.ControlReply;
 import com.harpia.generated.ControlRequest;
 import com.harpia.generated.ControlResult;
 import com.harpia.generated.ControlSetting;
 import com.harpia.generated.ControlStatus;
 import com.harpia.generated.Flag;
+import com.harpia.generated.ControlValue;
 import com.harpia.generated.StreamSettings;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -58,6 +66,10 @@ public class StreamingService extends Service {
     private ControlChannel channel;
     private PowerManager.WakeLock wakeLock;
     private WifiManager.WifiLock wifiLock;
+
+    static ControlStore controls(Context context) {
+        return new ControlStore(new File(context.getFilesDir(), "controls.pb"));
+    }
 
     static SettingsStore settings(Context context) {
         return new SettingsStore(new File(context.getFilesDir(), "settings.properties"));
@@ -160,7 +172,7 @@ public class StreamingService extends Service {
         server = new StreamServer(cfg.videoPort, stats);
         try {
             server.start();
-            streamer = new CameraStreamer(this, cfg, server, stats);
+            streamer = new CameraStreamer(this, cfg, server, stats, controls(this).load());
             streamer.start();
         } catch (Exception ex) {
             Log.e(TAG, "start failed", ex);
@@ -193,15 +205,92 @@ public class StreamingService extends Service {
     private ControlReply.Builder handle(ControlRequest r) {
         ControlReply.Builder out = ControlReply.newBuilder();
         if (r.hasStream()) applyStream(r.getStream(), out);
-        for (ControlSetting s : r.getSettingsList()) {
-            out.addResults(ControlResult.newBuilder().setKey(s.getKey()).setRequested(s.getValue())
-                    .setStatus(ControlStatus.CONTROL_STATUS_UNSUPPORTED)
-                    .setNote("camera controls are not implemented yet (mocap-camera-app control/2, /3)"));
-        }
+        if (r.getSettingsCount() > 0) applyControls(r.getSettingsList(), out);
         if (r.getWantDeviceInfo() == Flag.FLAG_ON) {
             out.setDeviceInfo(DeviceInfo.proto(this, settings.load().serial, streamer));
         }
         return out;
+    }
+
+    /**
+     * Applies camera controls (control/3): validated against the open camera's capabilities (ControlApplier),
+     * put on the repeating request, read back from the capture result, and the accepted ones saved
+     * (ControlStore) so a restart keeps them. One ControlResult per requested key, in request order.
+     */
+    private void applyControls(List<ControlSetting> settings, ControlReply.Builder out) {
+        CameraStreamer s = streamer;
+        CameraCharacteristics chars = s == null ? null : s.characteristics();
+        if (chars == null) {
+            for (ControlSetting c : settings) {
+                out.addResults(ControlResult.newBuilder().setKey(c.getKey()).setRequested(c.getValue())
+                        .setStatus(ControlStatus.CONTROL_STATUS_FAILED)
+                        .setNote("camera not running" + (stats.error.isEmpty() ? "" : ": " + stats.error)));
+            }
+            return;
+        }
+        Map<String, Object> current = s.currentValues();
+        Map<String, ControlCapability> caps = new HashMap<>();
+        Map<String, ControlValue> inEffect = new HashMap<>();
+        for (ControlCapability c : ControlCatalog.capabilities(Camera2Values.requestKeys(chars),
+                Camera2Values.characteristics(chars), current, s.defaultValues())) {
+            caps.put(c.getKey(), c);
+            if (c.hasCurrentValue()) inEffect.put(c.getKey(), c.getCurrentValue());
+            else if (c.hasDefaultValue()) inEffect.put(c.getKey(), c.getDefaultValue());
+        }
+        ControlStore store = controls(this);
+        for (ControlSetting c : store.load().values()) inEffect.put(c.getKey(), c.getValue());
+        int[] capabilities = chars.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES);
+        boolean manualSensor = false;
+        if (capabilities != null) {
+            for (int c : capabilities) {
+                if (c == CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR) manualSensor = true;
+            }
+        }
+
+        ControlApplier.Plan plan = ControlApplier.plan(settings, caps, manualSensor, current.keySet(), inEffect);
+        out.addAllProblems(plan.problems);
+        Map<String, ControlValue> values = new LinkedHashMap<>();
+        for (ControlApplier.Accepted a : plan.accepted.values()) values.put(a.key, a.value);
+        Map<String, String> failed = new HashMap<>();
+        Map<String, Object> readBack = new HashMap<>();
+        String error = null;
+        if (!values.isEmpty()) {
+            try {
+                readBack = s.apply(values, failed, RESTART_WAIT_MS);
+            } catch (IllegalStateException e) {
+                error = e.getMessage();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                error = "interrupted";
+            }
+        }
+        List<ControlSetting> keep = new ArrayList<>();
+        for (String key : plan.order) {
+            ControlResult refused = plan.refused.get(key);
+            if (refused != null) {
+                out.addResults(refused);
+                continue;
+            }
+            ControlApplier.Accepted a = plan.accepted.get(key);
+            if (error != null) {
+                out.addResults(ControlApplier.failed(a, error));
+            } else if (failed.containsKey(key)) {
+                out.addResults(ControlApplier.failed(a, failed.get(key)));
+            } else {
+                ControlResult result = ControlApplier.result(a, ControlCatalog.value(a.type, readBack.get(key)));
+                out.addResults(result);
+                if (result.getStatus() != ControlStatus.CONTROL_STATUS_FAILED) {  // what the camera took is kept
+                    keep.add(ControlSetting.newBuilder().setKey(key).setValue(a.value).build());
+                }
+            }
+        }
+        if (!keep.isEmpty()) {
+            try {
+                store.put(keep);
+            } catch (IOException e) {
+                out.addProblems("applied controls not saved (lost on restart): " + e.getMessage());
+            }
+        }
     }
 
     /**
