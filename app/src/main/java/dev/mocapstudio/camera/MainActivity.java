@@ -27,8 +27,9 @@ import java.util.Map;
  * Starts the camera stream and HTTP server. Settings are remembered (SharedPreferences), so tapping the
  * icon after a reboot resumes the last configuration. They can be changed by intent extras, e.g.
  *   am start -n dev.mocapstudio.camera/.MainActivity --ei width 1600 --ei height 1200 --ei fps 30 \
- *       --es mode h264 --ei bitrate 8000000 --ei quality 80 --es facing back
- * or over HTTP: GET /control?width=1600&height=1200&fps=30&mode=h264&bitrate=10000000 (restarts the pipeline).
+ *       --ei bitrate 8000000 --es facing back
+ * or over HTTP: GET /control?width=1600&height=1200&fps=30&bitrate=10000000 (restarts the pipeline).
+ * mode=h264 is accepted for camera-stream-eval's scripts: it is the only mode (stream protocol v1).
  */
 public class MainActivity extends Activity implements StreamServer.Controller {
     private static final String TAG = "MocapCamera";
@@ -89,8 +90,8 @@ public class MainActivity extends Activity implements StreamServer.Controller {
         ui.post(refresh);
     }
 
-    private static final String[] INT_KEYS = {"width", "height", "fps", "quality", "bitrate"};
-    private static final String[] STRING_KEYS = {"mode", "facing"};
+    private static final String[] INT_KEYS = {"width", "height", "fps", "bitrate"};
+    private static final String[] STRING_KEYS = {"facing"};
 
     private SharedPreferences prefs() {
         return getSharedPreferences("settings", MODE_PRIVATE);
@@ -102,9 +103,7 @@ public class MainActivity extends Activity implements StreamServer.Controller {
         cfg.width = p.getInt("width", cfg.width);
         cfg.height = p.getInt("height", cfg.height);
         cfg.fps = p.getInt("fps", cfg.fps);
-        cfg.quality = p.getInt("quality", cfg.quality);
         cfg.bitrate = p.getInt("bitrate", cfg.bitrate);
-        cfg.mode = p.getString("mode", cfg.mode);
         cfg.facing = p.getString("facing", cfg.facing);
         return cfg;
     }
@@ -112,7 +111,7 @@ public class MainActivity extends Activity implements StreamServer.Controller {
     private void startPipeline() {
         CameraStreamer.Config cfg = loadConfig();
         stats = new Stats(this);
-        server = new StreamServer(PORT, cfg.h264(), stats);
+        server = new StreamServer(PORT, stats);
         server.setController(this);
         try {
             server.start();
@@ -153,6 +152,8 @@ public class MainActivity extends Activity implements StreamServer.Controller {
                 }
             } else if (Arrays.asList(STRING_KEYS).contains(key)) {
                 e.putString(key, value);
+            } else if ("mode".equals(key)) {
+                if (!"h264".equals(value)) bad.append(key).append(' ');
             } else {
                 bad.append(key).append(' ');
             }
@@ -163,9 +164,9 @@ public class MainActivity extends Activity implements StreamServer.Controller {
         }
         CameraStreamer.Config c = loadConfig();
         return String.format(Locale.US,
-                "{\"width\":%d,\"height\":%d,\"fps\":%d,\"mode\":\"%s\",\"bitrate\":%d,\"quality\":%d,"
+                "{\"width\":%d,\"height\":%d,\"fps\":%d,\"mode\":\"h264\",\"bitrate\":%d,"
                         + "\"facing\":\"%s\",\"restarting\":%b,\"rejected\":\"%s\"}",
-                c.width, c.height, c.fps, c.mode, c.bitrate, c.quality, c.facing,
+                c.width, c.height, c.fps, c.bitrate, c.facing,
                 bad.length() == 0 && !params.isEmpty(), bad.toString().trim());
     }
 

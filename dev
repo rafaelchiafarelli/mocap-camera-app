@@ -70,7 +70,7 @@ usage: [T=<serial|ip:port>] ./dev <command>     (T selects the device when sever
 
  app
   install                    install the APK (camera permission granted)
-  launch [w h fps mode q]    (re)start the app; mode h264|mjpeg, q = kbps (h264) or JPEG quality (mjpeg)
+  launch [w h fps kbps]      (re)start the app with these settings (default 1600 1200 30 20000)
   logs                       follow the app's log
 USAGE
 }
@@ -89,12 +89,9 @@ case "$cmd" in
     tcpip)   adb tcpip 5555 ;;
     install) [ -f "$APK" ] || "$0" build; adb install -r -g "$APK" ;;
     launch)
-        mode="${4:-h264}"; q="${5:-}"
-        extra=(--ei quality "${q:-80}")
-        [ "$mode" = h264 ] && extra=(--ei bitrate "$(( ${q:-20000} * 1000 ))")
         adb shell am start -S -n "$PKG/.MainActivity" \
             --ei width "${1:-1600}" --ei height "${2:-1200}" --ei fps "${3:-30}" \
-            --es mode "$mode" "${extra[@]}" --es facing back
+            --ei bitrate "$(( ${4:-20000} * 1000 ))" --es facing back
         ;;
     logs)    adb logcat -s MocapCamera:* AndroidRuntime:E ;;
     adb)     adb "$@" ;;
