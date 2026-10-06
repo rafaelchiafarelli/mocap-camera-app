@@ -12,6 +12,7 @@ import android.hardware.camera2.CaptureResult;
 import android.hardware.camera2.TotalCaptureResult;
 import android.hardware.camera2.params.StreamConfigurationMap;
 import android.media.MediaCodec;
+import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.util.Log;
@@ -20,6 +21,8 @@ import android.util.Size;
 import android.view.Surface;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Collections;
 import java.util.Locale;
 
@@ -31,7 +34,8 @@ final class CameraStreamer {
         int width = 1600;
         int height = 1200;
         int fps = 30;
-        String facing = "back";
+        /** Camera2 id; null until declared (CameraSelector refuses to guess). */
+        String cameraId;
         int bitrate = 10_000_000;
     }
 
@@ -55,7 +59,7 @@ final class CameraStreamer {
     }
 
     @SuppressLint("MissingPermission") // checked by MainActivity before start()
-    void start() throws CameraAccessException {
+    void start() throws CameraAccessException, CameraSelector.SelectionException {
         cameraThread = new HandlerThread("camera");
         cameraThread.start();
         cameraHandler = new Handler(cameraThread.getLooper());
@@ -141,20 +145,26 @@ final class CameraStreamer {
         }
     }
 
-    private String pickCamera(CameraManager manager) throws CameraAccessException {
-        int wanted = "front".equals(cfg.facing)
-                ? CameraCharacteristics.LENS_FACING_FRONT : CameraCharacteristics.LENS_FACING_BACK;
-        String[] ids = manager.getCameraIdList();
-        for (String id : ids) {
-            Integer facing = manager.getCameraCharacteristics(id).get(CameraCharacteristics.LENS_FACING);
-            if (facing != null && facing == wanted) return id;
-        }
-        if (ids.length == 0) throw new IllegalStateException("no cameras");
-        stats.note = "no " + cfg.facing + " camera, using camera " + ids[0];
-        return ids[0];
+    private String pickCamera(CameraManager manager) throws CameraAccessException, CameraSelector.SelectionException {
+        List<CameraSelector.Camera> cameras = new ArrayList<>();
+        for (String id : manager.getCameraIdList()) cameras.add(describe(manager.getCameraCharacteristics(id), id));
+        return CameraSelector.select(cameras, cfg.cameraId).id;
     }
 
-    private static String facingName(Integer facing) {
+    static CameraSelector.Camera describe(CameraCharacteristics chars, String id) {
+        boolean logical = false;
+        List<String> physical = new ArrayList<>();
+        int[] caps = chars.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES);
+        if (Build.VERSION.SDK_INT >= 28 && caps != null) {
+            for (int c : caps) {
+                if (c == CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA) logical = true;
+            }
+            if (logical) physical.addAll(chars.getPhysicalCameraIds());
+        }
+        return new CameraSelector.Camera(id, logical, physical);
+    }
+
+    static String facingName(Integer facing) {
         if (facing == null) return "?";
         if (facing == CameraCharacteristics.LENS_FACING_BACK) return "back";
         if (facing == CameraCharacteristics.LENS_FACING_FRONT) return "front";
