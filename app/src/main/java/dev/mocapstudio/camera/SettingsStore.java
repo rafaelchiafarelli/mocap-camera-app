@@ -39,7 +39,7 @@ final class SettingsStore {
         p.setProperty("height", Integer.toString(cfg.height));
         p.setProperty("fps", Integer.toString(cfg.fps));
         p.setProperty("bitrate", Integer.toString(cfg.bitrate));
-        p.setProperty("facing", cfg.facing);
+        if (cfg.cameraId != null) p.setProperty("camera_id", cfg.cameraId);
         File tmp = new File(file.getPath() + ".tmp");
         try (OutputStream out = new FileOutputStream(tmp)) {
             p.store(out, "mocap-camera-app stream settings");
@@ -49,8 +49,9 @@ final class SettingsStore {
 
     /**
      * Sets one setting from its text form (intent extras, /control). False if the key is unknown or the value
-     * invalid; cfg is then unchanged. bitrate accepts kbps too (values below 100000). mode is accepted only as
-     * h264, the one mode of stream protocol v1, for camera-stream-eval's scripts.
+     * invalid; cfg is then unchanged. bitrate accepts kbps too (values below 100000). camera_id is a Camera2 id,
+     * checked against the device's cameras only when the camera opens. mode is accepted only as h264, the one
+     * mode of stream protocol v1, for camera-stream-eval's scripts.
      */
     static boolean set(CameraStreamer.Config cfg, String key, String value) {
         try {
@@ -62,9 +63,10 @@ final class SettingsStore {
                     int b = positive(value);
                     cfg.bitrate = b < 100_000 ? b * 1000 : b;
                     return true;
-                case "facing":
-                    if (!"back".equals(value) && !"front".equals(value)) return false;
-                    cfg.facing = value;
+                case "camera_id":
+                    String id = value == null ? "" : value.trim();
+                    if (id.isEmpty()) return false;
+                    cfg.cameraId = id;
                     return true;
                 case "mode": return "h264".equals(value);
                 default: return false;

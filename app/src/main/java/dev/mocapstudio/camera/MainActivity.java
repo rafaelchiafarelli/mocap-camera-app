@@ -25,14 +25,15 @@ import java.util.Collections;
  * Starts StreamingService from the foreground and shows its status. Shown over the lock screen, so it can do
  * that at boot. Settings are remembered (SettingsStore) and can be changed by intent extras, e.g.
  *   am start -n dev.mocapstudio.camera/.MainActivity --ei width 1600 --ei height 1200 --ei fps 30 \
- *       --ei bitrate 8000000 --es facing back
- * or over HTTP: GET /control?width=1600&height=1200&fps=30&bitrate=10000000 (restarts the pipeline).
+ *       --ei bitrate 8000000 --es camera_id 0
+ * or over HTTP: GET /control?width=1600&height=1200&fps=30&bitrate=10000000&camera_id=0 (restarts the pipeline).
+ * Nothing streams until camera_id is set: the camera is declared, never guessed (CameraSelector).
  * Closing this screen does not stop streaming; the notification's Stop action does.
  */
 public class MainActivity extends Activity {
     private static final String TAG = "MocapCamera";
     private static final String[] INT_KEYS = {"width", "height", "fps", "bitrate"};
-    private static final String[] STRING_KEYS = {"facing", "mode"};
+    private static final String[] STRING_KEYS = {"camera_id", "mode"};
 
     private final Handler ui = new Handler(Looper.getMainLooper());
     private TextView status;
