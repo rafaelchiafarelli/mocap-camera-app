@@ -12,6 +12,9 @@ import android.util.Range;
 import android.util.Rational;
 import android.util.Size;
 
+import com.harpia.generated.ControlValue;
+import com.harpia.generated.Flag;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -146,5 +149,93 @@ final class Camera2Values {
             return out;
         }
         return String.valueOf(v);
+    }
+
+    /**
+     * A ControlValue as the Java object a Camera2 request key takes, shaped like example (the key's value in the
+     * request template or a capture result); null when it can't be converted. Without an example, the value's
+     * own shape decides (int → Integer, except exposure time and frame duration: Long).
+     */
+    static Object toCamera2(String key, ControlValue v, Object example) {
+        if (example == null) {
+            if (v.hasIntValue()) {
+                return key.equals("android.sensor.exposureTime") || key.equals("android.sensor.frameDuration")
+                        ? (Object) v.getIntValue() : (Object) (int) v.getIntValue();
+            }
+            if (v.hasFloatValue()) return v.getFloatValue();
+            if (v.hasFlagValue()) return v.getFlagValue() == Flag.FLAG_ON;
+            if (v.hasTextValue()) return v.getTextValue();
+            if (key.endsWith("FpsRange") && v.getIntValuesCount() == 2) {
+                return Range.create((int) v.getIntValues(0), (int) v.getIntValues(1));
+            }
+            return null;
+        }
+        if (example instanceof Integer) return v.hasIntValue() ? (Object) (int) v.getIntValue() : null;
+        if (example instanceof Long) return v.hasIntValue() ? (Object) v.getIntValue() : null;
+        if (example instanceof Byte) return v.hasIntValue() ? (Object) (byte) v.getIntValue() : null;
+        if (example instanceof Float) return v.hasFloatValue() ? (Object) v.getFloatValue() : null;
+        if (example instanceof Double) return v.hasFloatValue() ? (Object) (double) v.getFloatValue() : null;
+        if (example instanceof Boolean) return v.hasFlagValue() ? (Object) (v.getFlagValue() == Flag.FLAG_ON) : null;
+        if (example instanceof String) return v.hasTextValue() ? v.getTextValue() : null;
+        if (example instanceof Range) {
+            if (v.getIntValuesCount() != 2) return null;
+            Object lower = ((Range<?>) example).getLower();
+            if (lower instanceof Long) return Range.create(v.getIntValues(0), v.getIntValues(1));
+            return Range.create((int) v.getIntValues(0), (int) v.getIntValues(1));
+        }
+        if (example instanceof int[]) {
+            int[] out = new int[v.getIntValuesCount()];
+            for (int i = 0; i < out.length; i++) out[i] = (int) v.getIntValues(i);
+            return out;
+        }
+        if (example instanceof long[]) {
+            long[] out = new long[v.getIntValuesCount()];
+            for (int i = 0; i < out.length; i++) out[i] = v.getIntValues(i);
+            return out;
+        }
+        if (example instanceof byte[]) {
+            byte[] out = new byte[v.getIntValuesCount()];
+            for (int i = 0; i < out.length; i++) out[i] = (byte) v.getIntValues(i);
+            return out;
+        }
+        if (example instanceof float[]) {
+            float[] out = new float[v.getFloatValuesCount()];
+            for (int i = 0; i < out.length; i++) out[i] = v.getFloatValues(i);
+            return out;
+        }
+        if (example instanceof Rect) {
+            if (v.getIntValuesCount() != 4) return null;
+            return new Rect((int) v.getIntValues(0), (int) v.getIntValues(1), (int) v.getIntValues(2), (int) v.getIntValues(3));
+        }
+        if (example instanceof Size) {
+            return v.getIntValuesCount() == 2 ? new Size((int) v.getIntValues(0), (int) v.getIntValues(1)) : null;
+        }
+        if (example instanceof MeteringRectangle[]) {
+            if (v.getIntValuesCount() % 5 != 0) return null;
+            MeteringRectangle[] out = new MeteringRectangle[v.getIntValuesCount() / 5];
+            for (int i = 0; i < out.length; i++) {
+                out[i] = new MeteringRectangle((int) v.getIntValues(5 * i), (int) v.getIntValues(5 * i + 1),
+                        (int) v.getIntValues(5 * i + 2), (int) v.getIntValues(5 * i + 3), (int) v.getIntValues(5 * i + 4));
+            }
+            return out;
+        }
+        if (example instanceof RggbChannelVector) {
+            if (v.getFloatValuesCount() != 4) return null;
+            return new RggbChannelVector(v.getFloatValues(0), v.getFloatValues(1), v.getFloatValues(2), v.getFloatValues(3));
+        }
+        if (example instanceof ColorSpaceTransform) {
+            if (v.getFloatValuesCount() != 9) return null;
+            Rational[] m = new Rational[9];
+            for (int i = 0; i < 9; i++) m[i] = new Rational(Math.round(v.getFloatValues(i) * 10000), 10000);
+            return new ColorSpaceTransform(m);
+        }
+        if (example instanceof TonemapCurve) {
+            int n = v.getFloatValuesCount();
+            if (n == 0 || n % 6 != 0) return null;  // three channels of (in, out) points
+            float[][] ch = new float[3][n / 3];
+            for (int c = 0; c < 3; c++) for (int i = 0; i < n / 3; i++) ch[c][i] = v.getFloatValues(c * n / 3 + i);
+            return new TonemapCurve(ch[0], ch[1], ch[2]);
+        }
+        return null;
     }
 }
