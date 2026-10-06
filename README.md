@@ -59,14 +59,35 @@ The app starts by itself when the tablet boots. For that:
   `./dev adb shell am start -n com.softwinner.awmanager/.AwManager` and set
   *Mocap Camera* to allowed (*Permitida*). Check with
   `./dev adb shell dumpsys background whitelist`.
+- Screen lock **None** or **Swipe** matters: with a PIN, Android keeps the
+  app's storage locked after a reboot, so nothing of the app can run until the
+  tablet is unlocked.
 - Wireless debugging turns itself off on every reboot (Android behaviour); the
-  app doesn't need it. Under WSL2 a USB tablet must
+  app doesn't need it. Big installs over USB/IP can drop the link: switch to
+  Wi-Fi adb with `./dev adb tcpip 5555` and `./dev connect <ip>`.
+
+### Settings
+
+`./dev launch key=value ...` saves settings and the device serial (from adb):
+`camera_id` (nothing streams until it is set; `install-app.sh` sets 0), `width`,
+`height`, `fps`, `bitrate`, `i_frame_interval_s`, and the ports `video_port`,
+`sync_port`, `control_port`, `stats_port` (8080–8083, as the recorder's
+`config.yaml` declares them). The recorder changes the stream settings with a
+`ControlRequest`.
+
+## Interfaces
+
+- `http://<tablet>:<video_port>/h264.raw`, UDP `<sync_port>`: stream protocol v1.
+- ZeroMQ (`camera.harpia`, Harpia's generated endpoints): `ControlRequest` in on
+  `<control_port>` (PULL), `ControlReply` out to the request's
+  `reply_endpoint` (PUSH), `CameraStats` every second on `<stats_port>` (PUB). Under WSL2 a USB tablet must
 first be attached from Windows with `usbipd attach --wsl --busid <BUSID>`.
 
 ## Status
 
 In progress: the bootstrap and streaming epics are done. The app streams
 stream protocol v1 from a foreground service that starts at boot, from the
-camera declared by id. Next: the control epic (ZeroMQ).
+camera declared by id, and the recorder controls it over ZeroMQ (control/1).
+Next: every Camera2 control (control/2, /3).
 Plan: [`initiatives/baseline/`](initiatives/baseline/baseline.md). Architecture:
 `mocap-studio/HANDOFF.md`.
