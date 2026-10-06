@@ -27,7 +27,7 @@ public class SettingsStoreTest {
         assertEquals(d.height, c.height);
         assertEquals(d.fps, c.fps);
         assertEquals(d.bitrate, c.bitrate);
-        assertEquals(d.facing, c.facing);
+        assertEquals(null, c.cameraId);
     }
 
     @Test
@@ -37,7 +37,7 @@ public class SettingsStoreTest {
         c.height = 720;
         c.fps = 60;
         c.bitrate = 20_000_000;
-        c.facing = "front";
+        c.cameraId = "1";
         new SettingsStore(file()).save(c);
 
         // A new store on the same file, as after the process restarts.
@@ -46,7 +46,7 @@ public class SettingsStoreTest {
         assertEquals(720, r.height);
         assertEquals(60, r.fps);
         assertEquals(20_000_000, r.bitrate);
-        assertEquals("front", r.facing);
+        assertEquals("1", r.cameraId);
         assertFalse(new File(file().getPath() + ".tmp").exists());
     }
 
@@ -70,9 +70,11 @@ public class SettingsStoreTest {
         assertEquals(8_000_000, c.bitrate);
         assertTrue(SettingsStore.set(c, "mode", "h264"));
         assertFalse(SettingsStore.set(c, "mode", "mjpeg"));
-        assertFalse(SettingsStore.set(c, "facing", "sideways"));
+        assertFalse(SettingsStore.set(c, "camera_id", " "));
+        assertFalse(SettingsStore.set(c, "facing", "back"));
+        assertTrue(SettingsStore.set(c, "camera_id", "2"));
+        assertEquals("2", c.cameraId);
         assertFalse(SettingsStore.set(c, "fps", "0"));
         assertFalse(SettingsStore.set(c, "quality", "80"));
-        assertEquals("back", c.facing);
     }
 }

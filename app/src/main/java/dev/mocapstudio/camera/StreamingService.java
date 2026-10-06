@@ -146,7 +146,7 @@ public class StreamingService extends Service implements StreamServer.Controller
             streamer.start();
         } catch (Exception ex) {
             Log.e(TAG, "start failed", ex);
-            stats.error = ex.toString();
+            stats.error = ex instanceof CameraSelector.SelectionException ? ex.getMessage() : ex.toString();
         }
     }
 
@@ -195,8 +195,9 @@ public class StreamingService extends Service implements StreamServer.Controller
         if (!restart) c = settings.load();
         return String.format(Locale.US,
                 "{\"width\":%d,\"height\":%d,\"fps\":%d,\"mode\":\"h264\",\"bitrate\":%d,"
-                        + "\"facing\":\"%s\",\"restarting\":%b,\"rejected\":\"%s\"}",
-                c.width, c.height, c.fps, c.bitrate, c.facing, restart, bad.toString().trim());
+                        + "\"camera_id\":%s,\"restarting\":%b,\"rejected\":\"%s\"}",
+                c.width, c.height, c.fps, c.bitrate, c.cameraId == null ? "null" : "\"" + c.cameraId + "\"",
+                restart, bad.toString().trim());
     }
 
     @Override
