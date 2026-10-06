@@ -1,6 +1,8 @@
-.gradle/
 build/
+app/build/
+.gradle/
+.gradle-home/
+.home/
 local.properties
 *.apk
-*.keystore
 .idea/

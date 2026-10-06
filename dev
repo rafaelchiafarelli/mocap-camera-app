@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# Toolbox for the camera app. The toolchain (JDK, Android SDK, Gradle, adb) runs in Docker.
+set -euo pipefail
+cd "$(dirname "$0")"
+source scripts/env.sh
+
+image() { docker build -t "$IMAGE" docker/; }
+ensure_image() { docker image inspect "$IMAGE" >/dev/null 2>&1 || image; }
+
+# Build/test as the host user so outputs aren't root-owned.
+as_user() {
+    ensure_image
+    mkdir -p .home .gradle-home
+    docker run --rm -u "$(id -u):$(id -g)" \
+        -e HOME=/work/.home -e GRADLE_USER_HOME=/work/.gradle-home \
+        -v "$PWD:/work" -w /work --network host "$IMAGE" "$@"
+}
+
+# A long-lived adb server container, so connections and authorizations survive between commands.
+# Its key lives in a Docker volume: devices that authorized it once stay authorized.
+up() {
+    ensure_image
+    if [ "$(docker inspect -f '{{.State.Running}}' "$ADB_CONTAINER" 2>/dev/null)" = "true" ]; then return; fi
+    docker rm -f "$ADB_CONTAINER" >/dev/null 2>&1 || true
+    local usb=()
+    if [ -d /dev/bus/usb ]; then
+        usb=(--privileged -v /dev/bus/usb:/dev/bus/usb)
+    else
+        echo "note: /dev/bus/usb not present (WSL without usbipd attach) - only Wi-Fi adb will work" >&2
+    fi
+    docker run -d --name "$ADB_CONTAINER" --network host "${usb[@]}" \
+        -v "$ADB_KEYS_VOLUME":/root/.android -v "$PWD:/work" -w /work \
+        "$IMAGE" adb nodaemon server >/dev/null
+    for _ in $(seq 20); do
+        docker exec "$ADB_CONTAINER" adb devices >/dev/null 2>&1 && return
+        sleep 0.5
+    done
+    echo "adb server did not come up (another adb server on port 5037, e.g. camera-stream-eval's?)" >&2
+    docker logs "$ADB_CONTAINER" >&2
+    exit 1
+}
+
+# T=<serial or ip:port> picks the device when more than one is connected.
+adb() { up; docker exec -i ${T:+-e ANDROID_SERIAL="$T"} "$ADB_CONTAINER" adb "$@"; }
+
+usage() {
+    cat <<USAGE
+usage: [T=<serial|ip:port>] ./dev <command>     (T selects the device when several are connected)
+
+ toolchain
+  image                      build the Docker toolchain image
+  build                      build the debug APK
+  test                       run the JVM unit tests
+
+ connecting (adb)
+  up | down                  start / stop the adb server container
+  devices                    list connected devices
+  pair <ip:port> <code>      Wireless debugging pairing (Android 11+), once per device
+  connect <ip[:port]>        connect over Wi-Fi (default port 5555)
+  tcpip                      switch a USB-connected device to Wi-Fi adb on :5555
+  adb <args...>              raw adb (inside the container)
+
+ app
+  install                    install the APK (camera permission granted)
+  launch [w h fps mode q]    (re)start the app; mode h264|mjpeg, q = kbps (h264) or JPEG quality (mjpeg)
+  logs                       follow the app's log
+USAGE
+}
+
+cmd="${1:-help}"; shift || true
+case "$cmd" in
+    image)   image ;;
+    build)   as_user gradle --no-daemon -q assembleDebug && ls -l "$APK" ;;
+    test)    as_user gradle --no-daemon testDebugUnitTest ;;
+    up)      up; echo "adb server running in container $ADB_CONTAINER" ;;
+    down)    docker rm -f "$ADB_CONTAINER" >/dev/null 2>&1 || true ;;
+    devices) adb devices -l ;;
+    pair)    adb pair "$@" ;;
+    connect) target="$1"; [[ "$target" == *:* ]] || target="$target:5555"; adb connect "$target" ;;
+    tcpip)   adb tcpip 5555 ;;
+    install) [ -f "$APK" ] || "$0" build; adb install -r -g "$APK" ;;
+    launch)
+        mode="${4:-h264}"; q="${5:-}"
+        extra=(--ei quality "${q:-80}")
+        [ "$mode" = h264 ] && extra=(--ei bitrate "$(( ${q:-20000} * 1000 ))")
+        adb shell am start -S -n "$PKG/.MainActivity" \
+            --ei width "${1:-1600}" --ei height "${2:-1200}" --ei fps "${3:-30}" \
+            --es mode "$mode" "${extra[@]}" --es facing back
+        ;;
+    logs)    adb logcat -s MocapCamera:* AndroidRuntime:E ;;
+    adb)     adb "$@" ;;
+    *)       usage ;;
+esac
