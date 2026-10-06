@@ -1,8 +1,8 @@
 ## 2. Generated contracts wired in
 
-- **Depends on:** 1; `mocap-contracts` **v0.2.0** (Java generation, done)
+- **Depends on:** 1; `mocap-contracts` **v0.2.1** (Java generation, done)
 - **Contract:**
-  - In: `mocap-contracts` at tag `v0.2.0`, as a submodule (`third_party/mocap-contracts`)
+  - In: `mocap-contracts` at tag `v0.2.1`, as a submodule (`third_party/mocap-contracts`)
   - Requires: its `gen/java/` Gradle project included in the build, consuming only the subset Harpia documents for Android (message classes, JSON, the JeroMQ client; never its DB/REST/SOAP/server parts); `minSdk 24`; no hand-written copies of any message
   - Delivers: the app compiles against the generated `camera.harpia` messages
 - **Pre-work:** none
