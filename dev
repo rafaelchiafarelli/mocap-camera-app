@@ -16,6 +16,13 @@ as_user() {
         -v "$PWD:/work" -w /work --network host "$IMAGE" "$@"
 }
 
+# The generated Java project from mocap-contracts, built into the jar the app depends on. Its nested Harpia
+# submodule is not needed: the generated sources are committed.
+contracts() {
+    [ -f "$CONTRACTS/build.gradle" ] || git submodule update --init third_party/mocap-contracts
+    as_user gradle --no-daemon -q -p "$CONTRACTS" --project-cache-dir /work/.gradle/contracts jar
+}
+
 # A long-lived adb server container, so connections and authorizations survive between commands.
 # Its key lives in a Docker volume: devices that authorized it once stay authorized.
 up() {
@@ -49,6 +56,7 @@ usage: [T=<serial|ip:port>] ./dev <command>     (T selects the device when sever
 
  toolchain
   image                      build the Docker toolchain image
+  contracts                  build the generated messages jar from third_party/mocap-contracts
   build                      build the debug APK
   test                       run the JVM unit tests
 
@@ -70,8 +78,9 @@ USAGE
 cmd="${1:-help}"; shift || true
 case "$cmd" in
     image)   image ;;
-    build)   as_user gradle --no-daemon -q assembleDebug && ls -l "$APK" ;;
-    test)    as_user gradle --no-daemon testDebugUnitTest ;;
+    contracts) contracts ;;
+    build)   contracts && as_user gradle --no-daemon -q assembleDebug && ls -l "$APK" ;;
+    test)    contracts && as_user gradle --no-daemon testDebugUnitTest ;;
     up)      up; echo "adb server running in container $ADB_CONTAINER" ;;
     down)    docker rm -f "$ADB_CONTAINER" >/dev/null 2>&1 || true ;;
     devices) adb devices -l ;;
