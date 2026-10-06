@@ -1,7 +1,8 @@
 # shellcheck shell=bash
 # Shared settings for ./dev (sourced, not executed).
 
-IMAGE=mocap-camera-app
+# Tagged with a hash of docker/, so a changed Dockerfile or lock file builds a fresh image.
+IMAGE=mocap-camera-app:$(cat "$(dirname "${BASH_SOURCE[0]}")"/../docker/* | sha256sum | cut -c1-12)
 ADB_CONTAINER=mocap-camera-app-adb
 ADB_KEYS_VOLUME=mocap-camera-app-adb-keys
 PKG=dev.mocapstudio.camera
