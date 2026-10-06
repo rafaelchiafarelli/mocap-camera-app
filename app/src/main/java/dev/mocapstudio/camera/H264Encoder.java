@@ -3,6 +3,7 @@ package dev.mocapstudio.camera;
 import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
+import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.Surface;
@@ -15,6 +16,7 @@ final class H264Encoder {
     private static final String TAG = "MocapCamera";
 
     private final int width, height, fps, bitrate;
+    private final float iFrameIntervalS;
     private final StreamServer server;
     private final Stats stats;
 
@@ -24,7 +26,8 @@ final class H264Encoder {
     private volatile boolean running;
     private long seq;
 
-    H264Encoder(int width, int height, int fps, int bitrate, StreamServer server, Stats stats) {
+    H264Encoder(int width, int height, int fps, int bitrate, float iFrameIntervalS, StreamServer server, Stats stats) {
+        this.iFrameIntervalS = iFrameIntervalS;
         this.width = width;
         this.height = height;
         this.fps = fps;
@@ -39,7 +42,11 @@ final class H264Encoder {
         format.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
         format.setInteger(MediaFormat.KEY_BIT_RATE, bitrate);
         format.setInteger(MediaFormat.KEY_FRAME_RATE, fps);
-        format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1);
+        if (Build.VERSION.SDK_INT >= 25) {
+            format.setFloat(MediaFormat.KEY_I_FRAME_INTERVAL, iFrameIntervalS);
+        } else {
+            format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, Math.max(1, Math.round(iFrameIntervalS)));
+        }
 
         codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC);
         codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
