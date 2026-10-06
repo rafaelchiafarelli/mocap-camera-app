@@ -9,6 +9,8 @@ import android.os.PowerManager;
 import android.os.Process;
 import android.os.SystemClock;
 
+import com.harpia.generated.CameraStats;
+
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -89,6 +91,21 @@ final class Stats {
     /** Frames the camera delivered that were never encoded (encoder too slow). */
     long droppedFrames() {
         return Math.max(0, cameraFrames.get() - encodedFrames.get());
+    }
+
+    /**
+     * The per-second CameraStats for the recorder (serial is filled in by ControlChannel). Thermal status is
+     * PowerManager's (API 29+); below that Android has none and 0 (THERMAL_STATUS_NONE) is sent.
+     */
+    CameraStats.Builder cameraStats() {
+        return CameraStats.newBuilder()
+                .setSensorNs(SensorClock.now())
+                .setCameraFps((float) cameraFps)
+                .setEncoderFps((float) encodedFps)
+                .setDroppedFrames(droppedFrames())
+                .setCpuPercent((float) Math.max(0, cpuPercent))
+                .setBatteryTempC(batteryTempC)
+                .setThermalStatus(Math.max(0, thermalStatus));
     }
 
     String toJson() {

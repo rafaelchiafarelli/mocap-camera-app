@@ -70,8 +70,9 @@ usage: [T=<serial|ip:port>] ./dev <command>     (T selects the device when sever
 
  app
   install                    install the APK (permissions granted, may start over others, no battery limits)
-  launch [w h fps kbps id]   (re)start the app with these settings (default 1600 1200 30 20000 0);
-                             id is the Camera2 camera id (see /info): nothing streams until one is set
+  launch [key=value ...]     (re)start the app, saving these settings and the device serial. Keys: camera_id
+                             (nothing streams until set) width height fps bitrate i_frame_interval_s
+                             video_port sync_port control_port stats_port (defaults 8080-8083)
   logs                       follow the app's log
 USAGE
 }
@@ -97,9 +98,14 @@ case "$cmd" in
         adb shell dumpsys deviceidle whitelist +"$PKG" >/dev/null
         ;;
     launch)
-        adb shell am start -S -n "$PKG/.MainActivity" \
-            --ei width "${1:-1600}" --ei height "${2:-1200}" --ei fps "${3:-30}" \
-            --ei bitrate "$(( ${4:-20000} * 1000 ))" --es camera_id "${5:-0}"
+        # The serial is the one adb reports (ro.serialno): what the recorder's ControlRequests address.
+        serial=$(adb shell getprop ro.serialno | tr -d '\r')
+        extras=(--es serial "$serial")
+        for kv in "$@"; do
+            [[ "$kv" == *=* ]] || { echo "launch: expected key=value, got '$kv'" >&2; exit 1; }
+            extras+=(--es "${kv%%=*}" "${kv#*=}")
+        done
+        adb shell am start -S -n "$PKG/.MainActivity" "${extras[@]}"
         ;;
     logs)    adb logcat -s MocapCamera:* AndroidRuntime:E ;;
     adb)     adb "$@" ;;

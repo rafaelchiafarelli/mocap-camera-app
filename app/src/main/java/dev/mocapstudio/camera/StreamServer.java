@@ -8,34 +8,19 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
-import java.net.URLDecoder;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Minimal HTTP server. Endpoints:
- *   /h264.raw     the video transport of stream protocol v1 (mocap-contracts docs/stream-protocol-v1.md §2):
- *                 H.264 Annex-B, codec config first, then access units from a key frame, each one the
+ * The video transport of stream protocol v1 (mocap-contracts docs/stream-protocol-v1.md §2), and nothing else:
+ *   /h264.raw     H.264 Annex-B, codec config first, then access units from a key frame, each one the
  *                 timestamp SEI + the frame's NALs. Watch live with: ffplay -fflags nobuffer -flags low_delay -framedrop -probesize 32 -analyzeduration 0 -sync ext -vf setpts=0 -f h264 http://host:8080/h264.raw
- * Until the ZeroMQ control channel replaces them (control epic), also:
- *   /             status page
- *   /stats        JSON counters
- *   /info         device capabilities (cameras, sizes, fps ranges, H.264 encoders)
- *   /control      ?width=&height=&fps=&bitrate=&camera_id= saves settings and restarts the pipeline
- *                 (no params: returns the current settings)
+ * Control, device info and stats go over ZeroMQ (ControlChannel).
  */
 final class StreamServer {
-    interface Controller {
-        String control(Map<String, String> params);
-
-        String info();
-    }
-
     private static final String TAG = "MocapCamera";
     private static final long SLOW_WRITE_NS = 200_000_000L;
 
@@ -45,7 +30,6 @@ final class StreamServer {
     private final Object frameLock = new Object();
 
     private volatile Runnable keyFrameRequester = () -> { };
-    private volatile Controller controller;
     private ServerSocket serverSocket;
     private volatile boolean running;
 
@@ -61,10 +45,6 @@ final class StreamServer {
 
     void setKeyFrameRequester(Runnable r) {
         keyFrameRequester = r;
-    }
-
-    void setController(Controller c) {
-        controller = c;
     }
 
     void start() throws IOException {
@@ -142,32 +122,9 @@ final class StreamServer {
 
             String[] parts = requestLine.split(" ");
             String path = parts.length > 1 ? parts[1] : "/";
-            Map<String, String> params = new LinkedHashMap<>();
-            int q = path.indexOf('?');
-            if (q >= 0) {
-                for (String kv : path.substring(q + 1).split("&")) {
-                    int eq = kv.indexOf('=');
-                    if (eq > 0) params.put(URLDecoder.decode(kv.substring(0, eq), "UTF-8"),
-                            URLDecoder.decode(kv.substring(eq + 1), "UTF-8"));
-                }
-                path = path.substring(0, q);
-            }
-
             OutputStream out = s.getOutputStream();
-            switch (path) {
-                case "/h264.raw": stream(out); break;
-                case "/stats": text(out, "200 OK", "application/json", stats.toJson()); break;
-                case "/info":
-                    Controller ic = controller;
-                    text(out, "200 OK", "application/json", ic == null ? "{}" : ic.info());
-                    break;
-                case "/control":
-                    Controller c = controller;
-                    text(out, "200 OK", "application/json", c == null ? "{}" : c.control(params));
-                    break;
-                case "/": text(out, "200 OK", "text/html; charset=utf-8", INDEX); break;
-                default: text(out, "404 Not Found", "text/plain", "not found\n");
-            }
+            if ("/h264.raw".equals(path)) stream(out);
+            else text(out, "404 Not Found", "only /h264.raw (stream protocol v1)\n");
         } catch (IOException | InterruptedException ignored) {
             // client went away
         } finally {
@@ -230,24 +187,11 @@ final class StreamServer {
         }
     }
 
-    private static void text(OutputStream out, String status, String type, String body) throws IOException {
+    private static void text(OutputStream out, String status, String body) throws IOException {
         byte[] b = body.getBytes(StandardCharsets.UTF_8);
-        out.write(("HTTP/1.0 " + status + "\r\nContent-Type: " + type + "\r\nContent-Length: " + b.length
-                + "\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+        out.write(("HTTP/1.0 " + status + "\r\nContent-Type: text/plain\r\nContent-Length: " + b.length
+                + "\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
         out.write(b);
         out.flush();
     }
-
-    private static final String HEAD = "<!doctype html><html><head><meta charset=utf-8>"
-            + "<meta name=viewport content='width=device-width,initial-scale=1'><title>Mocap Camera</title>"
-            + "<style>body{margin:0;background:#111;color:#ddd;font:13px monospace}"
-            + "pre,p{padding:8px;margin:0}</style>"
-            + "</head><body>";
-    private static final String STATS_SCRIPT = "<pre id=s></pre><script>"
-            + "setInterval(()=>fetch('/stats').then(r=>r.json())"
-            + ".then(j=>s.textContent=JSON.stringify(j,null,1)).catch(()=>{}),1000)"
-            + "</script></body></html>";
-    private static final String INDEX = HEAD
-            + "<p>Browsers can't play the raw H.264 stream. Watch with:<br>"
-            + "<b>ffplay -fflags nobuffer -flags low_delay -framedrop -probesize 32 -analyzeduration 0 -sync ext -vf setpts=0 -f h264 http://&lt;host&gt;:8080/h264.raw</b></p>" + STATS_SCRIPT;
 }

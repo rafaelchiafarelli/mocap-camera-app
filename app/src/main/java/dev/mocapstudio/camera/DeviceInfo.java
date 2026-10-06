@@ -13,10 +13,18 @@ import android.os.Build;
 import android.util.Range;
 import android.util.Size;
 
+import com.harpia.generated.CameraFacing;
+import com.harpia.generated.CameraInfo;
+import com.harpia.generated.FpsRange;
+import com.harpia.generated.FrameSize;
+
+import java.util.Collections;
 import java.util.Locale;
+import java.util.Map;
 
 /**
- * /info: what this device can do, as JSON, from the Android APIs (no vendor-specific dumpsys parsing).
+ * What this device can do, from the Android APIs (no vendor-specific dumpsys parsing): json() for the log and
+ * proto() for the recorder.
  * Every camera by id (facing, focal lengths in mm, sensor orientation in degrees, hardware level, logical
  * multi-camera and its physical lens ids, timestamp source, sizes for YUV and for a MediaCodec surface, fps
  * ranges), so the recorder knows which id to declare and how the image is oriented (pixels are never rotated),
@@ -107,6 +115,73 @@ final class DeviceInfo {
             sb.append('"').append(sizes[i].getWidth()).append('x').append(sizes[i].getHeight());
             if (ns > 0) sb.append(String.format(Locale.US, "@%.0f", 1e9 / ns));
             sb.append('"');
+        }
+    }
+
+    /**
+     * The same, as the generated camera.harpia DeviceInfo sent in a ControlReply, with every settable control of
+     * every camera (ControlCatalog); the streaming camera's controls also carry their current and default values.
+     */
+    static com.harpia.generated.DeviceInfo.Builder proto(Context context, String serial, CameraStreamer streaming) {
+        com.harpia.generated.DeviceInfo.Builder d = com.harpia.generated.DeviceInfo.newBuilder()
+                .setModel(Build.MANUFACTURER + " " + Build.MODEL)
+                .setSerial(serial)
+                .setAndroidVersion(Build.VERSION.RELEASE)
+                .setAppVersion(appVersion(context));
+        for (MediaCodecInfo info : new MediaCodecList(MediaCodecList.ALL_CODECS).getCodecInfos()) {
+            if (!info.isEncoder()) continue;
+            for (String type : info.getSupportedTypes()) {
+                if (type.equalsIgnoreCase(MediaFormat.MIMETYPE_VIDEO_AVC)) d.addH264Encoders(info.getName());
+            }
+        }
+        try {
+            CameraManager m = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
+            for (String id : m.getCameraIdList()) {
+                boolean open = streaming != null && id.equals(streaming.cameraId());
+                d.addCameras(cameraInfo(m.getCameraCharacteristics(id), id,
+                        open ? streaming.currentValues() : Collections.<String, Object>emptyMap(),
+                        open ? streaming.defaultValues() : Collections.<String, Object>emptyMap()));
+            }
+        } catch (Exception e) {
+            android.util.Log.w("MocapCamera", "camera list failed", e);
+        }
+        return d;
+    }
+
+    private static CameraInfo cameraInfo(CameraCharacteristics c, String id, Map<String, Object> current,
+                                         Map<String, Object> defaults) {
+        CameraInfo.Builder b = CameraInfo.newBuilder().setCameraId(id);
+        Integer facing = c.get(CameraCharacteristics.LENS_FACING);
+        b.setFacing(facing == null ? CameraFacing.CAMERA_FACING_UNSET
+                : facing == CameraCharacteristics.LENS_FACING_BACK ? CameraFacing.CAMERA_FACING_BACK
+                : facing == CameraCharacteristics.LENS_FACING_FRONT ? CameraFacing.CAMERA_FACING_FRONT
+                : CameraFacing.CAMERA_FACING_EXTERNAL);
+        b.setHardwareLevel(levelName(c.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL)).toUpperCase(Locale.US));
+        Integer orientation = c.get(CameraCharacteristics.SENSOR_ORIENTATION);
+        if (orientation != null) b.setSensorOrientationDeg(orientation);
+        float[] focal = c.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS);
+        if (focal != null) for (float f : focal) b.addFocalLengthsMm(f);
+        StreamConfigurationMap map = c.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+        Size[] sizes = map == null ? null : map.getOutputSizes(MediaCodec.class);
+        if (sizes != null) {
+            for (Size s : sizes) b.addSizes(FrameSize.newBuilder().setWidth(s.getWidth()).setHeight(s.getHeight()));
+        }
+        Range<Integer>[] ranges = c.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
+        if (ranges != null) {
+            for (Range<Integer> r : ranges) {
+                b.addFpsRanges(FpsRange.newBuilder().setMinFps(r.getLower()).setMaxFps(r.getUpper()));
+            }
+        }
+        b.addAllControls(ControlCatalog.capabilities(Camera2Values.requestKeys(c), Camera2Values.characteristics(c),
+                current, defaults));
+        return b.build();
+    }
+
+    private static String appVersion(Context context) {
+        try {
+            return context.getPackageManager().getPackageInfo(context.getPackageName(), 0).versionName;
+        } catch (Exception e) {
+            return "?";
         }
     }
 

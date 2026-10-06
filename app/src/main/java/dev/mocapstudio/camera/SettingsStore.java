@@ -40,6 +40,12 @@ final class SettingsStore {
         p.setProperty("fps", Integer.toString(cfg.fps));
         p.setProperty("bitrate", Integer.toString(cfg.bitrate));
         if (cfg.cameraId != null) p.setProperty("camera_id", cfg.cameraId);
+        p.setProperty("i_frame_interval_s", Float.toString(cfg.iFrameIntervalS));
+        p.setProperty("video_port", Integer.toString(cfg.videoPort));
+        p.setProperty("sync_port", Integer.toString(cfg.syncPort));
+        p.setProperty("control_port", Integer.toString(cfg.controlPort));
+        p.setProperty("stats_port", Integer.toString(cfg.statsPort));
+        if (cfg.serial != null) p.setProperty("serial", cfg.serial);
         File tmp = new File(file.getPath() + ".tmp");
         try (OutputStream out = new FileOutputStream(tmp)) {
             p.store(out, "mocap-camera-app stream settings");
@@ -48,8 +54,8 @@ final class SettingsStore {
     }
 
     /**
-     * Sets one setting from its text form (intent extras, /control). False if the key is unknown or the value
-     * invalid; cfg is then unchanged. bitrate accepts kbps too (values below 100000). camera_id is a Camera2 id,
+     * Sets one setting from its text form (intent extras). False if the key is unknown or the value invalid;
+     * cfg is then unchanged. bitrate accepts kbps too (values below 100000). camera_id is a Camera2 id,
      * checked against the device's cameras only when the camera opens. mode is accepted only as h264, the one
      * mode of stream protocol v1, for camera-stream-eval's scripts.
      */
@@ -68,12 +74,32 @@ final class SettingsStore {
                     if (id.isEmpty()) return false;
                     cfg.cameraId = id;
                     return true;
+                case "i_frame_interval_s":
+                    float f = Float.parseFloat(value.trim());
+                    if (!(f > 0) || Float.isInfinite(f)) return false;
+                    cfg.iFrameIntervalS = f;
+                    return true;
+                case "video_port": cfg.videoPort = port(value); return true;
+                case "sync_port": cfg.syncPort = port(value); return true;
+                case "control_port": cfg.controlPort = port(value); return true;
+                case "stats_port": cfg.statsPort = port(value); return true;
+                case "serial":
+                    String serial = value == null ? "" : value.trim();
+                    if (serial.isEmpty()) return false;
+                    cfg.serial = serial;
+                    return true;
                 case "mode": return "h264".equals(value);
                 default: return false;
             }
         } catch (NumberFormatException e) {
             return false;
         }
+    }
+
+    private static int port(String value) {
+        int v = positive(value);
+        if (v > 65535) throw new NumberFormatException(value);
+        return v;
     }
 
     private static int positive(String value) {
