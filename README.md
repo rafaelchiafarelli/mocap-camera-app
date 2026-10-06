@@ -45,7 +45,22 @@ The generated messages come from the `third_party/mocap-contracts` submodule
 jar. Its own nested Harpia submodule is not needed: the generated Java is
 committed in `mocap-contracts`.
 
-`./dev` has the individual steps (`./dev help`). Under WSL2 a USB tablet must
+`./dev` has the individual steps (`./dev help`).
+
+### Tablet setup (once per device)
+
+The app starts by itself when the tablet boots. For that:
+
+- Screen lock **None** or **Swipe** (with a PIN, Android holds the boot event
+  until the tablet is unlocked).
+- **Allwinner tablets (e.g. Multilaser M7):** the vendor's process limiter
+  (Awbms) blocks boot broadcasts and services of apps it doesn't list, and
+  adb can't change its list. Open it with
+  `./dev adb shell am start -n com.softwinner.awmanager/.AwManager` and set
+  *Mocap Camera* to allowed (*Permitida*). Check with
+  `./dev adb shell dumpsys background whitelist`.
+- Wireless debugging turns itself off on every reboot (Android behaviour); the
+  app doesn't need it. Under WSL2 a USB tablet must
 first be attached from Windows with `usbipd attach --wsl --busid <BUSID>`.
 
 ## Status
