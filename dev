@@ -69,7 +69,7 @@ usage: [T=<serial|ip:port>] ./dev <command>     (T selects the device when sever
   adb <args...>              raw adb (inside the container)
 
  app
-  install                    install the APK (camera permission granted)
+  install                    install the APK (permissions granted, may start over others, no battery limits)
   launch [w h fps kbps]      (re)start the app with these settings (default 1600 1200 30 20000)
   logs                       follow the app's log
 USAGE
@@ -87,7 +87,14 @@ case "$cmd" in
     pair)    adb pair "$@" ;;
     connect) target="$1"; [[ "$target" == *:* ]] || target="$target:5555"; adb connect "$target" ;;
     tcpip)   adb tcpip 5555 ;;
-    install) [ -f "$APK" ] || "$0" build; adb install -r -g "$APK" ;;
+    install)
+        [ -f "$APK" ] || "$0" build
+        adb install -r -g "$APK"
+        # Starting at boot: opening the app from the background needs "display over other apps"; battery
+        # optimisation must not stop the stream with the screen off.
+        adb shell appops set "$PKG" SYSTEM_ALERT_WINDOW allow
+        adb shell dumpsys deviceidle whitelist +"$PKG" >/dev/null
+        ;;
     launch)
         adb shell am start -S -n "$PKG/.MainActivity" \
             --ei width "${1:-1600}" --ei height "${2:-1200}" --ei fps "${3:-30}" \
