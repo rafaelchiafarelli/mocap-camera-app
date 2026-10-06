@@ -38,6 +38,9 @@ public class SettingsStoreTest {
         c.fps = 60;
         c.bitrate = 20_000_000;
         c.cameraId = "1";
+        c.iFrameIntervalS = 0.5f;
+        c.controlPort = 9002;
+        c.serial = "10023CF18200138";
         new SettingsStore(file()).save(c);
 
         // A new store on the same file, as after the process restarts.
@@ -47,6 +50,10 @@ public class SettingsStoreTest {
         assertEquals(60, r.fps);
         assertEquals(20_000_000, r.bitrate);
         assertEquals("1", r.cameraId);
+        assertEquals(0.5f, r.iFrameIntervalS, 0);
+        assertEquals(9002, r.controlPort);
+        assertEquals(8083, r.statsPort);
+        assertEquals("10023CF18200138", r.serial);
         assertFalse(new File(file().getPath() + ".tmp").exists());
     }
 
@@ -74,6 +81,11 @@ public class SettingsStoreTest {
         assertFalse(SettingsStore.set(c, "facing", "back"));
         assertTrue(SettingsStore.set(c, "camera_id", "2"));
         assertEquals("2", c.cameraId);
+        assertTrue(SettingsStore.set(c, "stats_port", "9003"));
+        assertFalse(SettingsStore.set(c, "stats_port", "70000"));
+        assertFalse(SettingsStore.set(c, "i_frame_interval_s", "0"));
+        assertFalse(SettingsStore.set(c, "serial", ""));
+        assertEquals(9003, c.statsPort);
         assertFalse(SettingsStore.set(c, "fps", "0"));
         assertFalse(SettingsStore.set(c, "quality", "80"));
     }

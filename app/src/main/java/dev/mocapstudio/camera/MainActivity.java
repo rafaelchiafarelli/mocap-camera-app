@@ -24,16 +24,13 @@ import java.util.Collections;
 /**
  * Starts StreamingService from the foreground and shows its status. Shown over the lock screen, so it can do
  * that at boot. Settings are remembered (SettingsStore) and can be changed by intent extras, e.g.
- *   am start -n dev.mocapstudio.camera/.MainActivity --ei width 1600 --ei height 1200 --ei fps 30 \
- *       --ei bitrate 8000000 --es camera_id 0
- * or over HTTP: GET /control?width=1600&height=1200&fps=30&bitrate=10000000&camera_id=0 (restarts the pipeline).
- * Nothing streams until camera_id is set: the camera is declared, never guessed (CameraSelector).
+ *   am start -n dev.mocapstudio.camera/.MainActivity --es width 1600 --es fps 30 --es camera_id 0 --es serial X
+ * (./dev launch key=value ...), or by the recorder's ControlRequest (stream settings). Nothing streams until
+ * camera_id is set: the camera is declared, never guessed (CameraSelector).
  * Closing this screen does not stop streaming; the notification's Stop action does.
  */
 public class MainActivity extends Activity {
     private static final String TAG = "MocapCamera";
-    private static final String[] INT_KEYS = {"width", "height", "fps", "bitrate"};
-    private static final String[] STRING_KEYS = {"camera_id", "mode"};
 
     private final Handler ui = new Handler(Looper.getMainLooper());
     private TextView status;
@@ -82,16 +79,17 @@ public class MainActivity extends Activity {
         else status.setText("Camera permission denied.");
     }
 
-    /** Intent extras override the saved settings. */
+    /** Intent extras (any type, any SettingsStore key) override the saved settings; unknown keys are logged. */
     private void saveExtras(Intent i) {
+        Bundle extras = i.getExtras();
+        if (extras == null) return;
         SettingsStore store = StreamingService.settings(this);
         CameraStreamer.Config cfg = store.load();
         boolean changed = false;
-        for (String key : INT_KEYS) {
-            if (i.hasExtra(key)) changed |= SettingsStore.set(cfg, key, Integer.toString(i.getIntExtra(key, 0)));
-        }
-        for (String key : STRING_KEYS) {
-            if (i.hasExtra(key)) changed |= SettingsStore.set(cfg, key, i.getStringExtra(key));
+        for (String key : extras.keySet()) {
+            Object v = extras.get(key);
+            if (v != null && SettingsStore.set(cfg, key, String.valueOf(v))) changed = true;
+            else Log.w(TAG, "ignored extra " + key + "=" + v);
         }
         if (!changed) return;
         try {
@@ -111,8 +109,11 @@ public class MainActivity extends Activity {
     private final Runnable refresh = new Runnable() {
         @Override public void run() {
             String s = StreamingService.status();
-            status.setText("http://" + localIp() + ":" + StreamingService.PORT + "/\n\n"
-                    + (s == null ? "starting..." : s));
+            CameraStreamer.Config c = StreamingService.settings(MainActivity.this).load();
+            status.setText(String.format(java.util.Locale.US,
+                    "%s  video :%d/h264.raw  sync :%d  control :%d  stats :%d  serial %s\n\n%s",
+                    localIp(), c.videoPort, c.syncPort, c.controlPort, c.statsPort, c.serial,
+                    s == null ? "starting..." : s));
             ui.postDelayed(this, 1000);
         }
     };
