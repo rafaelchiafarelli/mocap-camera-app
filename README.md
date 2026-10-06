@@ -65,7 +65,8 @@ first be attached from Windows with `usbipd attach --wsl --busid <BUSID>`.
 
 ## Status
 
-In progress: the bootstrap epic is done. The app builds, behaves like the eval
-app, and compiles against the generated `camera.harpia` messages.
+In progress: the bootstrap and streaming epics are done. The app streams
+stream protocol v1 from a foreground service that starts at boot, from the
+camera declared by id. Next: the control epic (ZeroMQ).
 Plan: [`initiatives/baseline/`](initiatives/baseline/baseline.md). Architecture:
 `mocap-studio/HANDOFF.md`.
