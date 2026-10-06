@@ -19,15 +19,15 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Minimal HTTP server. Endpoints:
- *   /             viewer page
- *   /stream       multipart/x-mixed-replace; one part per frame, with X-Frame-Seq, X-Timestamp-Ns,
- *                 X-Wall-Ms and X-Kind (jpeg | config | key | delta). MJPEG mode: plays in a browser.
- *   /h264.raw     H.264 Annex-B elementary stream (h264 mode), watch live with: ffplay -fflags nobuffer -flags low_delay -framedrop -probesize 32 -analyzeduration 0 -sync ext -vf setpts=0 -f h264 http://host:8080/h264.raw
- *   /snapshot.jpg latest frame (mjpeg mode)
+ *   /h264.raw     the video transport of stream protocol v1 (mocap-contracts docs/stream-protocol-v1.md §2):
+ *                 H.264 Annex-B, codec config first, then access units from a key frame, each one the
+ *                 timestamp SEI + the frame's NALs. Watch live with: ffplay -fflags nobuffer -flags low_delay -framedrop -probesize 32 -analyzeduration 0 -sync ext -vf setpts=0 -f h264 http://host:8080/h264.raw
+ * Until the ZeroMQ control channel replaces them (control epic), also:
+ *   /             status page
  *   /stats        JSON counters
  *   /info         device capabilities (cameras, sizes, fps ranges, H.264 encoders)
- *   /control      ?width=&height=&fps=&mode=&bitrate=&quality=&facing= saves settings and restarts the
- *                 pipeline (no params: returns the current settings)
+ *   /control      ?width=&height=&fps=&bitrate=&facing= saves settings and restarts the pipeline
+ *                 (no params: returns the current settings)
  */
 final class StreamServer {
     interface Controller {
@@ -37,11 +37,9 @@ final class StreamServer {
     }
 
     private static final String TAG = "MocapCamera";
-    private static final String BOUNDARY = "frame";
     private static final long SLOW_WRITE_NS = 200_000_000L;
 
     private final int port;
-    private final boolean h264;
     private final Stats stats;
     private final Set<Socket> sockets = Collections.newSetFromMap(new ConcurrentHashMap<Socket, Boolean>());
     private final Object frameLock = new Object();
@@ -54,13 +52,10 @@ final class StreamServer {
     private byte[] codecConfig;
     private byte[] frame;
     private long frameSeq;
-    private long frameTimestampNs;
-    private long frameWallMs;
     private boolean frameKey;
 
-    StreamServer(int port, boolean h264, Stats stats) {
+    StreamServer(int port, Stats stats) {
         this.port = port;
-        this.h264 = h264;
         this.stats = stats;
     }
 
@@ -112,13 +107,11 @@ final class StreamServer {
         }
     }
 
-    /** Called by the encoder for every frame (a JPEG, or an H.264 access unit). */
-    void publish(byte[] data, long timestampNs, boolean key) {
+    /** Called by the encoder for every access unit (timestamp SEI + the frame's NALs). */
+    void publish(byte[] accessUnit, boolean key) {
         synchronized (frameLock) {
-            frame = data;
+            frame = accessUnit;
             frameSeq++;
-            frameTimestampNs = timestampNs;
-            frameWallMs = System.currentTimeMillis();
             frameKey = key;
             frameLock.notifyAll();
         }
@@ -162,15 +155,7 @@ final class StreamServer {
 
             OutputStream out = s.getOutputStream();
             switch (path) {
-                case "/stream": stream(out, true); break;
-                case "/h264.raw":
-                    if (h264) stream(out, false);
-                    else text(out, "404 Not Found", "text/plain", "app is in mjpeg mode\n");
-                    break;
-                case "/snapshot.jpg":
-                    if (h264) text(out, "404 Not Found", "text/plain", "app is in h264 mode\n");
-                    else snapshot(out);
-                    break;
+                case "/h264.raw": stream(out); break;
                 case "/stats": text(out, "200 OK", "application/json", stats.toJson()); break;
                 case "/info":
                     Controller ic = controller;
@@ -180,7 +165,7 @@ final class StreamServer {
                     Controller c = controller;
                     text(out, "200 OK", "application/json", c == null ? "{}" : c.control(params));
                     break;
-                case "/": text(out, "200 OK", "text/html; charset=utf-8", h264 ? INDEX_H264 : INDEX_MJPEG); break;
+                case "/": text(out, "200 OK", "text/html; charset=utf-8", INDEX); break;
                 default: text(out, "404 Not Found", "text/plain", "not found\n");
             }
         } catch (IOException | InterruptedException ignored) {
@@ -191,49 +176,47 @@ final class StreamServer {
         }
     }
 
-    private void stream(OutputStream out, boolean multipart) throws IOException, InterruptedException {
-        String type = multipart ? "multipart/x-mixed-replace; boundary=" + BOUNDARY : "video/h264";
-        out.write(("HTTP/1.0 200 OK\r\nContent-Type: " + type + "\r\n"
+    private void stream(OutputStream out) throws IOException, InterruptedException {
+        out.write(("HTTP/1.0 200 OK\r\nContent-Type: video/h264\r\n"
                 + "Cache-Control: no-cache\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
         stats.clients.incrementAndGet();
         try {
-            boolean needKey = false;
-            if (h264) {
-                byte[] cfg;
-                synchronized (frameLock) {
-                    long deadline = System.currentTimeMillis() + 3000;
-                    while (running && codecConfig == null && System.currentTimeMillis() < deadline) frameLock.wait(500);
-                    cfg = codecConfig;
-                }
-                if (cfg == null) return;
-                writeFrame(out, multipart, cfg, 0, 0, 0, "config");
-                needKey = true;
-                keyFrameRequester.run();
+            byte[] cfg;
+            synchronized (frameLock) {
+                long deadline = System.currentTimeMillis() + 3000;
+                while (running && codecConfig == null && System.currentTimeMillis() < deadline) frameLock.wait(500);
+                cfg = codecConfig;
             }
+            if (cfg == null) return;
+            out.write(cfg);
+            out.flush();
+            boolean needKey = true;
+            keyFrameRequester.run();
 
             long lastSeq = 0;
             while (running) {
                 byte[] data;
-                long seq, ts, wall;
+                long seq;
                 boolean key;
                 synchronized (frameLock) {
                     while (running && frameSeq == lastSeq) frameLock.wait(1000);
                     if (!running) return;
-                    data = frame; seq = frameSeq; ts = frameTimestampNs; wall = frameWallMs; key = frameKey;
+                    data = frame; seq = frameSeq; key = frameKey;
                 }
                 if (lastSeq != 0 && seq > lastSeq + 1) {
                     stats.clientSkippedFrames.addAndGet(seq - lastSeq - 1);
-                    if (h264 && !needKey) {  // a gap breaks the H.264 reference chain
+                    if (!needKey) {  // a gap breaks the H.264 reference chain
                         needKey = true;
                         keyFrameRequester.run();
                     }
                 }
                 lastSeq = seq;
-                if (h264 && needKey && !key) continue;
+                if (needKey && !key) continue;
                 needKey = false;
 
                 long t0 = System.nanoTime();
-                writeFrame(out, multipart, data, seq, ts, wall, h264 ? (key ? "key" : "delta") : "jpeg");
+                out.write(data);
+                out.flush();
                 long blocked = System.nanoTime() - t0;
                 if (blocked > SLOW_WRITE_NS) {
                     stats.slowWrites.incrementAndGet();
@@ -247,40 +230,6 @@ final class StreamServer {
         }
     }
 
-    private static void writeFrame(OutputStream out, boolean multipart, byte[] data,
-                                   long seq, long ts, long wall, String kind) throws IOException {
-        if (multipart) {
-            out.write(("--" + BOUNDARY + "\r\n"
-                    + "Content-Type: " + ("jpeg".equals(kind) ? "image/jpeg" : "video/h264") + "\r\n"
-                    + "Content-Length: " + data.length + "\r\n"
-                    + "X-Kind: " + kind + "\r\n"
-                    + "X-Frame-Seq: " + seq + "\r\n"
-                    + "X-Timestamp-Ns: " + ts + "\r\n"
-                    + "X-Wall-Ms: " + wall + "\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
-            out.write(data);
-            out.write("\r\n".getBytes(StandardCharsets.US_ASCII));
-        } else {
-            out.write(data);
-        }
-        out.flush();
-    }
-
-    private void snapshot(OutputStream out) throws IOException, InterruptedException {
-        byte[] jpeg;
-        synchronized (frameLock) {
-            if (frame == null) frameLock.wait(3000);
-            jpeg = frame;
-        }
-        if (jpeg == null) {
-            text(out, "503 Service Unavailable", "text/plain", "no frame yet\n");
-            return;
-        }
-        out.write(("HTTP/1.0 200 OK\r\nContent-Type: image/jpeg\r\nContent-Length: " + jpeg.length
-                + "\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
-        out.write(jpeg);
-        out.flush();
-    }
-
     private static void text(OutputStream out, String status, String type, String body) throws IOException {
         byte[] b = body.getBytes(StandardCharsets.UTF_8);
         out.write(("HTTP/1.0 " + status + "\r\nContent-Type: " + type + "\r\nContent-Length: " + b.length
@@ -290,16 +239,15 @@ final class StreamServer {
     }
 
     private static final String HEAD = "<!doctype html><html><head><meta charset=utf-8>"
-            + "<meta name=viewport content='width=device-width,initial-scale=1'><title>Tablet Stream</title>"
+            + "<meta name=viewport content='width=device-width,initial-scale=1'><title>Mocap Camera</title>"
             + "<style>body{margin:0;background:#111;color:#ddd;font:13px monospace}"
-            + "img{display:block;max-width:100%;max-height:85vh;margin:auto}pre,p{padding:8px;margin:0}</style>"
+            + "pre,p{padding:8px;margin:0}</style>"
             + "</head><body>";
     private static final String STATS_SCRIPT = "<pre id=s></pre><script>"
             + "setInterval(()=>fetch('/stats').then(r=>r.json())"
             + ".then(j=>s.textContent=JSON.stringify(j,null,1)).catch(()=>{}),1000)"
             + "</script></body></html>";
-    private static final String INDEX_MJPEG = HEAD + "<img src='/stream'>" + STATS_SCRIPT;
-    private static final String INDEX_H264 = HEAD
-            + "<p>H.264 mode — browsers can't play the raw stream. Watch with:<br>"
+    private static final String INDEX = HEAD
+            + "<p>Browsers can't play the raw H.264 stream. Watch with:<br>"
             + "<b>ffplay -fflags nobuffer -flags low_delay -framedrop -probesize 32 -analyzeduration 0 -sync ext -vf setpts=0 -f h264 http://&lt;host&gt;:8080/h264.raw</b></p>" + STATS_SCRIPT;
 }
