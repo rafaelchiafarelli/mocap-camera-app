@@ -11,3 +11,22 @@
 - **Pre-work:** none
 - **Out of scope:** choosing values (studio setup)
 - **Tests:** JVM with a fake camera: read-back values reported; an out-of-range value is clamped or refused per the capability; manual exposure without AE off is a reported conflict; on a `LIMITED` device without `MANUAL_SENSOR`, exposure time is UNSUPPORTED
+
+### Device check (2026-10-06)
+
+Multilaser M7 (LIMITED, no `MANUAL_SENSOR`), one `ControlRequest` over the control channel, reply checked
+under the contract rules, values read back from the 5th capture result made with them:
+
+| setting | result |
+|---|---|
+| `aeTargetFpsRange` [30, 30] | APPLIED, read back [30, 30] |
+| `aeExposureCompensation` 10 | CLAMPED to the range [−4, 4]; read back **0** |
+| `aeLock` ON, `awbLock` ON | **FAILED**: read back OFF |
+| `sensor.exposureTime` 8 ms | UNSUPPORTED (no `MANUAL_SENSOR`) |
+| `aeMode` OFF | UNSUPPORTED (offers `ON` only) |
+| `sensor.timestamp` | READ_ONLY |
+| `com.vendor.nope` | UNSUPPORTED |
+
+So the M7's HAL lists exposure compensation and the AE/AWB locks but doesn't take them (or doesn't report
+them): on this tablet nothing about exposure can be locked or set. The applied controls were saved and put
+back on the request after an app restart; the stream kept its SEIs (194 frames in 6.5 s, no gaps).

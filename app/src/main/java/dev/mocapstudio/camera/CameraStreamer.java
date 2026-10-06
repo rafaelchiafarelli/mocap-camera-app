@@ -20,12 +20,18 @@ import android.util.Range;
 import android.util.Size;
 import android.view.Surface;
 
+import com.harpia.generated.ControlSetting;
+import com.harpia.generated.ControlValue;
 import com.harpia.generated.StreamSettings;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.List;
 import java.util.Collections;
 import java.util.Locale;
@@ -65,7 +71,17 @@ final class CameraStreamer {
     private volatile TotalCaptureResult latest;
     private volatile Map<String, Object> defaults = Collections.emptyMap();
 
-    CameraStreamer(Context context, Config cfg, StreamServer server, Stats stats) {
+    /** Camera controls saved by earlier ControlRequests (ControlStore), put back on every new session. */
+    private final Map<String, ControlSetting> savedControls;
+    private CaptureRequest.Builder request;
+    private volatile Object pendingTag;
+    private volatile TotalCaptureResult taggedResult;
+    private volatile int taggedCount;
+    private volatile CountDownLatch taggedLatch;
+    private static final int READ_BACK_FRAMES = 5;
+
+    CameraStreamer(Context context, Config cfg, StreamServer server, Stats stats, Map<String, ControlSetting> savedControls) {
+        this.savedControls = savedControls;
         this.context = context;
         this.cfg = cfg;
         this.server = server;
@@ -166,15 +182,12 @@ final class CameraStreamer {
                                 defaults = Camera2Values.values(b, chars);
                                 b.addTarget(target);
                                 b.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, fpsRange);
-                                s.setRepeatingRequest(b.build(), new CameraCaptureSession.CaptureCallback() {
-                                    @Override public void onCaptureCompleted(CameraCaptureSession ss,
-                                            CaptureRequest r, TotalCaptureResult result) {
-                                        stats.cameraFrames.incrementAndGet();
-                                        latest = result;
-                                        Long ts = result.get(CaptureResult.SENSOR_TIMESTAMP);
-                                        if (ts != null) SensorClock.calibrate(ts);
-                                    }
-                                }, cameraHandler);
+                                Map<String, ControlValue> saved = new LinkedHashMap<>();
+                                for (ControlSetting c : savedControls.values()) saved.put(c.getKey(), c.getValue());
+                                Map<String, String> failed = put(b, saved);
+                                if (!failed.isEmpty()) stats.note = "saved controls not applied: " + failed;
+                                request = b;
+                                s.setRepeatingRequest(b.build(), frames, cameraHandler);
                             } catch (CameraAccessException | IllegalStateException e) {
                                 stats.error = "repeating request failed: " + e.getMessage();
                             }
@@ -186,6 +199,96 @@ final class CameraStreamer {
         } catch (CameraAccessException e) {
             stats.error = "createCaptureSession failed: " + e.getMessage();
         }
+    }
+
+    private final CameraCaptureSession.CaptureCallback frames = new CameraCaptureSession.CaptureCallback() {
+        @Override public void onCaptureCompleted(CameraCaptureSession ss, CaptureRequest r, TotalCaptureResult result) {
+            stats.cameraFrames.incrementAndGet();
+            latest = result;
+            Long ts = result.get(CaptureResult.SENSOR_TIMESTAMP);
+            if (ts != null) SensorClock.calibrate(ts);
+            Object tag = pendingTag;
+            if (tag != null && r.getTag() == tag) {
+                taggedResult = result;
+                if (++taggedCount >= READ_BACK_FRAMES) taggedLatch.countDown();
+            }
+        }
+    };
+
+    /** The open camera's characteristics, or null. */
+    CameraCharacteristics characteristics() {
+        return chars;
+    }
+
+    /**
+     * Puts these controls (already validated, ControlApplier) on the repeating request and returns what the
+     * camera reports for them: the capture result of the READ_BACK_FRAMES-th frame made with them (AE and AWB
+     * need a few frames to settle), normalised (Camera2Values), by key. Keys that could not be set go into
+     * failed with the reason. Called off the camera thread; waits up to timeoutMs.
+     */
+    Map<String, Object> apply(Map<String, ControlValue> values, Map<String, String> failed, long timeoutMs)
+            throws InterruptedException {
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        while (request == null && stats.error.isEmpty() && System.currentTimeMillis() < deadline) Thread.sleep(50);
+        if (request == null) throw new IllegalStateException("camera not running" + (stats.error.isEmpty() ? "" : ": " + stats.error));
+        CountDownLatch set = new CountDownLatch(1);
+        CountDownLatch read = new CountDownLatch(1);
+        Object tag = new Object();
+        String[] error = {null};
+        cameraHandler.post(() -> {
+            try {
+                failed.putAll(put(request, values));
+                request.setTag(tag);
+                taggedCount = 0;
+                taggedResult = null;
+                taggedLatch = read;
+                pendingTag = tag;
+                session.setRepeatingRequest(request.build(), frames, cameraHandler);
+            } catch (CameraAccessException | IllegalStateException | IllegalArgumentException e) {
+                error[0] = e.toString();
+            }
+            set.countDown();
+        });
+        if (!set.await(Math.max(1, deadline - System.currentTimeMillis()), TimeUnit.MILLISECONDS)) {
+            throw new IllegalStateException("camera thread busy");
+        }
+        if (error[0] != null) throw new IllegalStateException("repeating request failed: " + error[0]);
+        read.await(Math.max(1, deadline - System.currentTimeMillis()), TimeUnit.MILLISECONDS);
+        TotalCaptureResult r = taggedResult;
+        pendingTag = null;
+        Map<String, Object> out = new HashMap<>();
+        if (r == null) return out;
+        Map<String, Object> all = Camera2Values.values(r);
+        for (String key : values.keySet()) if (all.containsKey(key)) out.put(key, all.get(key));
+        return out;
+    }
+
+    /** Sets each value on the builder as its key's Camera2 type; returns the keys that failed, with why. */
+    @SuppressWarnings("unchecked")
+    private Map<String, String> put(CaptureRequest.Builder b, Map<String, ControlValue> values) {
+        Map<String, CaptureRequest.Key<?>> keys = new HashMap<>();
+        for (CaptureRequest.Key<?> k : chars.getAvailableCaptureRequestKeys()) keys.put(k.getName(), k);
+        Map<String, String> failed = new LinkedHashMap<>();
+        for (Map.Entry<String, ControlValue> e : values.entrySet()) {
+            CaptureRequest.Key<?> k = keys.get(e.getKey());
+            if (k == null) {
+                failed.put(e.getKey(), "not a request key of this camera");
+                continue;
+            }
+            Object example = b.get(k);
+            Object v = Camera2Values.toCamera2(e.getKey(), e.getValue(), example);
+            if (v == null) {
+                failed.put(e.getKey(), "value doesn't fit the key's Camera2 type"
+                        + (example == null ? "" : " (" + example.getClass().getSimpleName() + ")"));
+                continue;
+            }
+            try {
+                b.set((CaptureRequest.Key<Object>) k, v);
+            } catch (IllegalArgumentException ex) {
+                failed.put(e.getKey(), "rejected by Camera2: " + ex.getMessage());
+            }
+        }
+        return failed;
     }
 
     private String pickCamera(CameraManager manager) throws CameraAccessException, CameraSelector.SelectionException {
