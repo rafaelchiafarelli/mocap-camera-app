@@ -29,8 +29,28 @@ never defines a format of its own.
 It starts from the evaluation app in `mocap-studio/camera-stream-eval`, which
 stays as the tool that decides whether a device is good enough.
 
+## Build and install
+
+Only Docker is needed on the host; the toolchain (JDK 17, Android SDK 34,
+Gradle 8.7, adb) is a Docker image.
+
+```bash
+scripts/install-deps.sh    # check Docker, build the toolchain image
+scripts/build.sh           # JVM unit tests, then the debug APK
+scripts/install-app.sh     # install on the connected tablet and start it
+```
+
+The generated messages come from the `third_party/mocap-contracts` submodule
+(pinned to a tag); `./dev contracts` initialises it if needed and builds its
+jar. Its own nested Harpia submodule is not needed: the generated Java is
+committed in `mocap-contracts`.
+
+`./dev` has the individual steps (`./dev help`). Under WSL2 a USB tablet must
+first be attached from Windows with `usbipd attach --wsl --busid <BUSID>`.
+
 ## Status
 
-Planned, no code yet. Built in Docker (JDK 17, Android SDK 34, Gradle).
+In progress: the bootstrap epic is done. The app builds, behaves like the eval
+app, and compiles against the generated `camera.harpia` messages.
 Plan: [`initiatives/baseline/`](initiatives/baseline/baseline.md). Architecture:
 `mocap-studio/HANDOFF.md`.
