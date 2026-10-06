@@ -20,6 +20,8 @@ import android.util.Range;
 import android.util.Size;
 import android.view.Surface;
 
+import com.harpia.generated.StreamSettings;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -37,6 +39,11 @@ final class CameraStreamer {
         /** Camera2 id; null until declared (CameraSelector refuses to guess). */
         String cameraId;
         int bitrate = 10_000_000;
+        float iFrameIntervalS = 1f;
+        /** Declared per camera in the recorder's config.yaml (CameraConfig); these are the defaults. */
+        int videoPort = 8080, syncPort = 8081, controlPort = 8082, statsPort = 8083;
+        /** This device's serial, as the recorder addresses it; set at install (./dev install), null until then. */
+        String serial;
     }
 
     private final Context context;
@@ -50,6 +57,7 @@ final class CameraStreamer {
     private CameraCaptureSession session;
     private H264Encoder encoder;
     private Surface target;
+    private volatile StreamSettings applied;
 
     CameraStreamer(Context context, Config cfg, StreamServer server, Stats stats) {
         this.context = context;
@@ -76,7 +84,11 @@ final class CameraStreamer {
             SensorClock.useBoottime();
         }
 
-        encoder = new H264Encoder(size.getWidth(), size.getHeight(), fpsRange.getUpper(), cfg.bitrate, server, stats);
+        encoder = new H264Encoder(size.getWidth(), size.getHeight(), fpsRange.getUpper(), cfg.bitrate,
+                cfg.iFrameIntervalS, server, stats);
+        applied = StreamSettings.newBuilder().setCameraId(cameraId).setWidth(size.getWidth())
+                .setHeight(size.getHeight()).setFps(fpsRange.getUpper()).setBitrateKbps(cfg.bitrate / 1000)
+                .setIFrameIntervalS(cfg.iFrameIntervalS).build();
         try {
             target = encoder.start();
         } catch (IOException e) {
@@ -104,6 +116,11 @@ final class CameraStreamer {
                 d.close();
             }
         }, cameraHandler);
+    }
+
+    /** What the pipeline actually runs (the closest size and fps range the camera has), or null before start. */
+    StreamSettings applied() {
+        return applied;
     }
 
     void stop() {
