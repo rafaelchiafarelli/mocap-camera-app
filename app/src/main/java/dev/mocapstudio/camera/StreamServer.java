@@ -26,7 +26,7 @@ import java.util.concurrent.ConcurrentHashMap;
  *   /             status page
  *   /stats        JSON counters
  *   /info         device capabilities (cameras, sizes, fps ranges, H.264 encoders)
- *   /control      ?width=&height=&fps=&bitrate=&facing= saves settings and restarts the pipeline
+ *   /control      ?width=&height=&fps=&bitrate=&camera_id= saves settings and restarts the pipeline
  *                 (no params: returns the current settings)
  */
 final class StreamServer {

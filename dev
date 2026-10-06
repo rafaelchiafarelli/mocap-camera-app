@@ -70,7 +70,8 @@ usage: [T=<serial|ip:port>] ./dev <command>     (T selects the device when sever
 
  app
   install                    install the APK (permissions granted, may start over others, no battery limits)
-  launch [w h fps kbps]      (re)start the app with these settings (default 1600 1200 30 20000)
+  launch [w h fps kbps id]   (re)start the app with these settings (default 1600 1200 30 20000 0);
+                             id is the Camera2 camera id (see /info): nothing streams until one is set
   logs                       follow the app's log
 USAGE
 }
@@ -98,7 +99,7 @@ case "$cmd" in
     launch)
         adb shell am start -S -n "$PKG/.MainActivity" \
             --ei width "${1:-1600}" --ei height "${2:-1200}" --ei fps "${3:-30}" \
-            --ei bitrate "$(( ${4:-20000} * 1000 ))" --es facing back
+            --ei bitrate "$(( ${4:-20000} * 1000 ))" --es camera_id "${5:-0}"
         ;;
     logs)    adb logcat -s MocapCamera:* AndroidRuntime:E ;;
     adb)     adb "$@" ;;
