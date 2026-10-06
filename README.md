@@ -47,24 +47,39 @@ committed in `mocap-contracts`.
 
 `./dev` has the individual steps (`./dev help`).
 
-### Tablet setup (once per device)
+### Tablet setup: every tablet, once
 
-The app starts by itself when the tablet boots. For that:
+Do all of this on **each** tablet before it is used as a camera (found on
+the first Multilaser M7, 2026-10-05/06). `T=<serial|ip:port>` picks the
+tablet when several are connected.
 
-- Screen lock **None** or **Swipe** (with a PIN, Android holds the boot event
-  until the tablet is unlocked).
-- **Allwinner tablets (e.g. Multilaser M7):** the vendor's process limiter
-  (Awbms) blocks boot broadcasts and services of apps it doesn't list, and
-  adb can't change its list. Open it with
-  `./dev adb shell am start -n com.softwinner.awmanager/.AwManager` and set
-  *Mocap Camera* to allowed (*Permitida*). Check with
-  `./dev adb shell dumpsys background whitelist`.
-- Screen lock **None** or **Swipe** matters: with a PIN, Android keeps the
-  app's storage locked after a reboot, so nothing of the app can run until the
-  tablet is unlocked.
-- Wireless debugging turns itself off on every reboot (Android behaviour); the
-  app doesn't need it. Big installs over USB/IP can drop the link: switch to
-  Wi-Fi adb with `./dev adb tcpip 5555` and `./dev connect <ip>`.
+1. **USB debugging on** (Developer options), and the PC authorised.
+2. **No screen lock.** With a PIN, pattern or password Android keeps the
+   app's storage locked after every reboot, so the camera stays off until
+   someone unlocks it. Clear it with
+   `./dev adb shell locksettings clear --old <PIN>` (or Settings → Security →
+   Screen lock → None).
+3. **Install and declare it:** `scripts/install-app.sh [camera_id=<id>]`. This
+   grants the permissions, "display over other apps" (start at boot) and the
+   battery-optimisation exemption, and saves the device serial and the
+   camera id (default 0; the ids are in `DeviceInfo`).
+4. **Allwinner tablets (e.g. Multilaser M7):** allow the app in the vendor's
+   process limiter (Awbms), which otherwise drops its boot start and services
+   and can't be changed over adb:
+   `./dev adb shell am start -n com.softwinner.awmanager/.AwManager`, set
+   *Mocap Camera* to *Permitida*, check with
+   `./dev adb shell dumpsys background whitelist`.
+5. **Check:** `./dev adb reboot`; the stream must come back by itself on
+   `http://<ip>:8080/h264.raw` within about two minutes.
+6. **Record it** in `mocap-studio` (hardware inventory): model, Android
+   version, serial, camera ids, and what `DeviceInfo` says it can control
+   (the M7 has no manual exposure or focus).
+
+Notes:
+- Wireless debugging turns itself off on every reboot (Android behaviour);
+  the app doesn't need it. Big installs over USB/IP can drop the link: switch
+  to Wi-Fi adb with `./dev adb tcpip 5555` and `./dev connect <ip>` (lasts until
+  the next reboot).
 
 ### Settings
 
