@@ -24,6 +24,8 @@ import com.harpia.generated.StreamSettings;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Map;
 import java.util.List;
 import java.util.Collections;
 import java.util.Locale;
@@ -51,6 +53,7 @@ final class CameraStreamer {
     private final StreamServer server;
     private final Stats stats;
 
+    private CameraCharacteristics chars;
     private HandlerThread cameraThread;
     private Handler cameraHandler;
     private CameraDevice device;
@@ -58,6 +61,9 @@ final class CameraStreamer {
     private H264Encoder encoder;
     private Surface target;
     private volatile StreamSettings applied;
+    private volatile String cameraId;
+    private volatile TotalCaptureResult latest;
+    private volatile Map<String, Object> defaults = Collections.emptyMap();
 
     CameraStreamer(Context context, Config cfg, StreamServer server, Stats stats) {
         this.context = context;
@@ -75,6 +81,8 @@ final class CameraStreamer {
         CameraManager manager = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
         String cameraId = pickCamera(manager);
         CameraCharacteristics chars = manager.getCameraCharacteristics(cameraId);
+        this.cameraId = cameraId;
+        this.chars = chars;
         StreamConfigurationMap map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
         Size size = pickSize(map.getOutputSizes(MediaCodec.class));
         Range<Integer> fpsRange = pickFpsRange(chars.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES));
@@ -123,6 +131,22 @@ final class CameraStreamer {
         return applied;
     }
 
+    /** The open camera's id, or null. */
+    String cameraId() {
+        return cameraId;
+    }
+
+    /** The latest capture result's values, by Camera2 name (empty before the first frame). */
+    Map<String, Object> currentValues() {
+        TotalCaptureResult r = latest;
+        return r == null ? Collections.<String, Object>emptyMap() : Camera2Values.values(r);
+    }
+
+    /** The repeating request's template (TEMPLATE_RECORD) values: the controls' defaults. */
+    Map<String, Object> defaultValues() {
+        return defaults;
+    }
+
     void stop() {
         try { if (session != null) session.close(); } catch (Exception ignored) { }
         try { if (device != null) device.close(); } catch (Exception ignored) { }
@@ -139,12 +163,14 @@ final class CameraStreamer {
                             session = s;
                             try {
                                 CaptureRequest.Builder b = device.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
+                                defaults = Camera2Values.values(b, chars);
                                 b.addTarget(target);
                                 b.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, fpsRange);
                                 s.setRepeatingRequest(b.build(), new CameraCaptureSession.CaptureCallback() {
                                     @Override public void onCaptureCompleted(CameraCaptureSession ss,
                                             CaptureRequest r, TotalCaptureResult result) {
                                         stats.cameraFrames.incrementAndGet();
+                                        latest = result;
                                         Long ts = result.get(CaptureResult.SENSOR_TIMESTAMP);
                                         if (ts != null) SensorClock.calibrate(ts);
                                     }

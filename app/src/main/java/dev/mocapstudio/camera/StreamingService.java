@@ -199,7 +199,7 @@ public class StreamingService extends Service {
                     .setNote("camera controls are not implemented yet (mocap-camera-app control/2, /3)"));
         }
         if (r.getWantDeviceInfo() == Flag.FLAG_ON) {
-            out.setDeviceInfo(DeviceInfo.proto(this, settings.load().serial));
+            out.setDeviceInfo(DeviceInfo.proto(this, settings.load().serial, streamer));
         }
         return out;
     }
