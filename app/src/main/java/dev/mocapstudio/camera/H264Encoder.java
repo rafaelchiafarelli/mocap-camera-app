@@ -121,7 +121,7 @@ final class H264Encoder {
             data = au;
             stats.jpegBytesTotal.addAndGet(data.length);
             stats.encodedFrames.incrementAndGet();
-            server.publish(data, ptsNs, (flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0);
+            server.publish(data, (flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0);
         }
     }
 }

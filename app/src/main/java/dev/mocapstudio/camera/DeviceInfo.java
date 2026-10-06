@@ -17,7 +17,9 @@ import java.util.Locale;
 
 /**
  * /info: what this device can do, as JSON, from the Android APIs (no vendor-specific dumpsys parsing).
- * Cameras (facing, sizes for YUV and for a MediaCodec surface, fps ranges, hardware level, timestamp source)
+ * Every camera by id (facing, focal lengths in mm, sensor orientation in degrees, hardware level, logical
+ * multi-camera and its physical lens ids, timestamp source, sizes for YUV and for a MediaCodec surface, fps
+ * ranges), so the recorder knows which id to declare and how the image is oriented (pixels are never rotated),
  * and every H.264 encoder (hardware or software, supported size and bitrate ranges).
  */
 final class DeviceInfo {
@@ -53,9 +55,26 @@ final class DeviceInfo {
                 StreamConfigurationMap map = c.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
                 sb.append('{');
                 kv(sb, "id", id).append(',');
-                kv(sb, "facing", facing == null ? "?" : facing == CameraCharacteristics.LENS_FACING_BACK ? "back"
-                        : facing == CameraCharacteristics.LENS_FACING_FRONT ? "front" : "external").append(',');
+                kv(sb, "facing", CameraStreamer.facingName(facing)).append(',');
+                sb.append("\"focal_lengths_mm\":[");
+                float[] focal = c.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS);
+                if (focal != null) {
+                    for (int i = 0; i < focal.length; i++) {
+                        if (i > 0) sb.append(',');
+                        sb.append(String.format(Locale.US, "%.3f", focal[i]));
+                    }
+                }
+                sb.append("],");
+                Integer orientation = c.get(CameraCharacteristics.SENSOR_ORIENTATION);
+                sb.append("\"sensor_orientation_deg\":").append(orientation == null ? "null" : orientation).append(',');
                 kv(sb, "hardware_level", levelName(level)).append(',');
+                CameraSelector.Camera sel = CameraStreamer.describe(c, id);
+                sb.append("\"logical\":").append(sel.logical).append(",\"physical_ids\":[");
+                for (int i = 0; i < sel.physicalIds.size(); i++) {
+                    if (i > 0) sb.append(',');
+                    kv0(sb, sel.physicalIds.get(i));
+                }
+                sb.append("],");
                 kv(sb, "timestamp_source", ts != null && ts == CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME
                         ? "realtime" : "unknown").append(',');
                 sb.append("\"fps_ranges\":[");
@@ -121,6 +140,10 @@ final class DeviceInfo {
             case 4: return "external";
             default: return String.valueOf(level);
         }
+    }
+
+    private static StringBuilder kv0(StringBuilder sb, String v) {
+        return sb.append('"').append(escape(v)).append('"');
     }
 
     private static StringBuilder kv(StringBuilder sb, String k, String v) {
