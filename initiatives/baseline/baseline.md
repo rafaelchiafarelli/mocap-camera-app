@@ -18,3 +18,20 @@
 
 General context, cross-repository order and open questions:
 `mocap-studio/HANDOFF.md`.
+
+## Gate result (2026-10-06): met, with the M7's limits accepted
+
+On the Multilaser M7 (the only STREAM tablet; Rafael keeps it unless it proves really bad, 2026-10-06):
+
+- **Quick run** (`camera-stream-eval/run-eval.sh --app camera --quick usb`, fixes/000026 there; report in
+  `camera-stream-eval/results/M7_WIFI-200138-20261006-231457/`): verdict **WARN** (10 pass, 2 warn, 0 fail).
+  1600×1200 at 10 and 20 Mbps and a 2 min soak at 20 Mbps: 29.9 fps, 0 frames lost, capture→PC median
+  42–49 ms; clock sync best RTT ≈ 2.2 ms, drift ≈ −22 ppm.
+- **Controls locked through the ZeroMQ channel:** `aeTargetFpsRange` [30, 30] APPLIED and read back. AE lock
+  and AWB lock are the two WARNs: the M7's HAL doesn't take them (read back OFF), and it has no manual
+  exposure or focus at all (control/2, /3). So on the M7 "locked controls" means the fps range only; its
+  exposure follows the scene. Accepted by Rafael for now; a tablet that takes them would pass clean.
+- **Protocol v1:** the sample stream read with the `mocap-contracts` reference reader: 298/298 frames timed,
+  no gaps, no problems.
+- **20 min with the screen off:** streaming/2 (0 dropped on the device, 7/35,870 lost on the network,
+  never ended).

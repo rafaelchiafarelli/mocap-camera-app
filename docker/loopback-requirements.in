@@ -1,0 +1,5 @@
+# The recorder side of the control loopback test (app/src/test/.../ControlChannelLoopbackTest, tests/loopback/recorder.py).
+# mocap-contracts itself comes from the submodule (PYTHONPATH), so only its runtime deps are here:
+# the versions it allows (third_party/mocap-contracts/pyproject.toml, [zmq] extra).
+protobuf>=4.21.12,<5
+pyzmq>=24.0.1,<27
