@@ -23,4 +23,4 @@ Rules specific to this repository:
 
 | Initiative | Status |
 |---|---|
-| [baseline](baseline/baseline.md) | Planned — not started |
+| [baseline](baseline/baseline.md) | Done — gate met on the M7 (2026-10-06) |
