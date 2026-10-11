@@ -1,5 +1,6 @@
 build/
 app/build/
+app/debug.keystore
 .gradle/
 .gradle-home/
 .home/
