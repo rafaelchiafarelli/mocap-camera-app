@@ -24,3 +24,4 @@ Rules specific to this repository:
 | Initiative | Status |
 |---|---|
 | [baseline](baseline/baseline.md) | Done — gate met on the M7 (2026-10-06) |
+| [bugs](bugs/bugs.md) | Open — a backlog, fixed when a bug gets in the way |
