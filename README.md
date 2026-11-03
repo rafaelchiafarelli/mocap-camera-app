@@ -80,6 +80,8 @@ Notes:
   the app doesn't need it. Big installs over USB/IP can drop the link: switch
   to Wi-Fi adb with `./dev adb tcpip 5555` and `./dev connect <ip>` (lasts until
   the next reboot).
+- Wireless debugging ports change on every reconnect: scan 30000–49999 for open
+  ports. Only one adb server may run, because port 5037 is shared with Windows.
 
 ### Settings
 
